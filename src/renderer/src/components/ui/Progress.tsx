@@ -11,17 +11,26 @@ export interface ProgressRingProps {
   thickness?: number
   tone?: Tone
   label?: string
+  /** Soft breathing glow behind the arc, e.g. while tracking. */
+  live?: boolean
   children?: ReactNode
 }
 
-export function ProgressRing({ value, size = 220, thickness = 10, tone = 'accent', label = 'Progress', children }: ProgressRingProps) {
+export function ProgressRing({ value, size = 220, thickness = 10, tone = 'accent', label = 'Progress', live, children }: ProgressRingProps) {
   const v = Math.max(0, Math.min(1, value))
   const r = (size - thickness) / 2
   const c = 2 * Math.PI * r
   return (
     <div className="relative inline-grid place-items-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value * 100)} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={thickness} />
+      {/* Glow is its own element blurred as a whole: a blur inside the ring's SVG is clipped to its viewport. */}
+      {live && v > 0 && (
+        <svg aria-hidden width={size} height={size} className="absolute inset-0 -rotate-90 overflow-visible" style={{ filter: `blur(${thickness}px)`, animation: 'ttt-breathe 3.2s ease-in-out infinite' }}>
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={stroke[tone]} strokeWidth={thickness * 2.2} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - v)} />
+        </svg>
+      )}
+      <svg width={size} height={size} role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(value * 100)} className="relative -rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--sunken)" strokeWidth={thickness} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--line)" strokeWidth={1} />
         <circle
           cx={size / 2}
           cy={size / 2}

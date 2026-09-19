@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   addDays, dateKey, dayBalance, expectedMinutesForDay, rangeStats, splitSessionsByDay,
-  startOfDay, totalBalance, weekdayIndex, weeklyTotals, workedMinutesByDay
+  projectTotals, startOfDay, totalBalance, weekdayIndex, weeklyTotals, workedMinutesByDay
 } from './time'
 import { formatClock, formatDelta, formatDuration, formatDurationLong } from './format'
 import { DEFAULT_SCHEDULE, DEFAULT_SETTINGS, type Session } from './types'
 
 const t = (y: number, m: number, d: number, h = 0, mi = 0): number => new Date(y, m - 1, d, h, mi).getTime()
-const sess = (start: number, end: number | null, id = 1): Session => ({ id, startTs: start, endTs: end, source: 'manual', note: '' })
+const sess = (start: number, end: number | null, id = 1): Session => ({ id, startTs: start, endTs: end, source: 'manual', note: '', projectId: null })
 const S = DEFAULT_SETTINGS
 
 describe('date helpers', () => {
@@ -135,5 +135,18 @@ describe('format', () => {
   })
   it('clock', () => {
     expect(formatClock(t(2026, 1, 1, 7, 5))).toBe('07:05')
+  })
+})
+
+describe('projectTotals', () => {
+  it('clips to the window and groups by project', () => {
+    const mk = (start: number, end: number | null, projectId: number | null) => ({ ...sess(start, end), projectId })
+    const H = 36e5
+    const out = projectTotals([mk(0, 2 * H, 1), mk(3 * H, 4 * H, 2), mk(5 * H, null, 1), mk(-H, H / 2, null)], 0, 10 * H, 6 * H)
+    expect(out).toEqual([
+      { projectId: 1, minutes: 180 },
+      { projectId: 2, minutes: 60 },
+      { projectId: null, minutes: 30 }
+    ])
   })
 })

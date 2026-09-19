@@ -18,5 +18,26 @@ export const migrations: string[] = [
   `,
   `
   CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  `
+  CREATE TABLE projects (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT 'brass',
+    archived INTEGER NOT NULL DEFAULT 0
+  );
+  ALTER TABLE sessions ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL;
+  CREATE INDEX idx_sessions_project ON sessions(project_id);
+  INSERT INTO projects (name, color) VALUES ('General', 'brass');
+  UPDATE sessions SET project_id = (SELECT id FROM projects LIMIT 1);
+  `,
+  `
+  -- Existing installs already know their way around: skip the welcome flow for them.
+  INSERT OR IGNORE INTO settings (key, value) SELECT 'onboarded', 'true' WHERE EXISTS (SELECT 1 FROM sessions);
+  `,
+  `
+  -- The monthly goal became monthly contract hours.
+  INSERT OR IGNORE INTO settings (key, value) SELECT 'monthlyHoursMin', value FROM settings WHERE key = 'monthlyGoalMin';
+  DELETE FROM settings WHERE key = 'monthlyGoalMin';
   `
 ]

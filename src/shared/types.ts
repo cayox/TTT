@@ -6,6 +6,26 @@ export interface Session {
   endTs: number | null // null while running
   source: SessionSource
   note: string
+  projectId: number | null
+}
+
+/** Palette keys; each maps to a theme-aware CSS color (--p-<key>). */
+export const PROJECT_COLORS = ['brass', 'sage', 'clay', 'slate', 'teal', 'plum', 'rose', 'ochre'] as const
+export type ProjectColor = (typeof PROJECT_COLORS)[number]
+
+export interface Project {
+  id: number
+  name: string
+  color: ProjectColor
+  archived: boolean
+}
+
+/** What the Mac can see of the current network. ssid is null when macOS hides it (no Location permission). */
+export interface CurrentNetwork {
+  ssid: string | null
+  /** MAC address of the default router; identifies the network without the SSID. */
+  routerId: string | null
+  gateway: string | null
 }
 
 export type DayKind = 'holiday' | 'vacation' | 'sick' | 'custom'
@@ -27,6 +47,24 @@ export interface Settings {
   autoTrack: boolean
   launchAtLogin: boolean
   creditKinds: DayKind[] // kinds credited with expected worktime
+  /** Project new sessions go to; null = first active project. */
+  defaultProjectId: number | null
+  /** Work network name -> router MAC, to recognize it when macOS hides the SSID. */
+  networkRouters: Record<string, string>
+  /** Work SSID -> project for Wi-Fi started sessions; missing = default project. */
+  ssidProjects: Record<string, number>
+  /** Overtime (+) or undertime (−) in minutes carried over from before tracking; added to the running balance. */
+  startingBalance: number
+  /** Name printed on exported timesheets. */
+  exportName: string
+  /** Monthly hours from the work contract, in minutes; 0 = not tracked. */
+  monthlyHoursMin: number
+  /** Monthly hours are set per project (projectMonthlyMin) instead of as one total. */
+  monthlyHoursByProject: boolean
+  /** Project id -> monthly hours in minutes, used when monthlyHoursByProject is on. */
+  projectMonthlyMin: Record<string, number>
+  /** First-run welcome flow finished or skipped. */
+  onboarded: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -36,7 +74,16 @@ export const DEFAULT_SETTINGS: Settings = {
   graceMinutes: 5,
   autoTrack: false,
   launchAtLogin: false,
-  creditKinds: ['vacation', 'sick', 'holiday']
+  creditKinds: ['vacation', 'sick', 'holiday'],
+  defaultProjectId: null,
+  networkRouters: {},
+  ssidProjects: {},
+  startingBalance: 0,
+  exportName: '',
+  monthlyHoursMin: 0,
+  monthlyHoursByProject: false,
+  projectMonthlyMin: {},
+  onboarded: false
 }
 
 export const DEFAULT_SCHEDULE: Schedule = [480, 480, 480, 480, 480, 0, 0]

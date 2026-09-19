@@ -1,16 +1,18 @@
 @import 'tailwindcss';
+@import '@fontsource-variable/fraunces/opsz.css';
 
 /* Theme: data-theme="light|dark" on <html>; no attribute = follow system. */
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 @theme inline {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
-  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', system-ui, sans-serif;
+  --font-display: 'Fraunces Variable', 'New York', Georgia, serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
 
   --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-raised: var(--raised);
+  --color-raised-solid: var(--raised-solid);
   --color-sunken: var(--sunken);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
@@ -26,7 +28,6 @@
   --color-under: var(--under);
   --color-under-soft: var(--under-soft);
   --color-danger: var(--danger);
-  --color-sidebar: var(--sidebar);
 
   --radius-sm: 6px;
   --radius-md: 8px;
@@ -39,89 +40,127 @@
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Light: pale sand-slate. */
 :root {
   color-scheme: light;
-  --bg: #ffffff;
-  --surface: #f7f7f8;
-  --raised: #ffffff;
-  --sunken: #efeff1;
-  --line: rgb(24 24 27 / 0.09);
-  --line-strong: rgb(24 24 27 / 0.18);
-  --fg: #1c1c1f;
-  --muted: #5c5c66;
-  --faint: #8a8a94;
-  --accent: #2f62d8;
-  --accent-hover: #2755c0;
-  --accent-fg: #ffffff;
-  --accent-soft: rgb(47 98 216 / 0.11);
-  --over: #0f7a55;
-  --over-soft: rgb(15 122 85 / 0.12);
-  --under: #c2410c;
-  --under-soft: rgb(194 65 12 / 0.11);
-  --danger: #c02a3a;
-  --sidebar: rgb(246 246 248 / 0.55);
-  --shadow-card: 0 1px 2px rgb(24 24 40 / 0.05), 0 1px 1px rgb(24 24 40 / 0.03);
-  --shadow-pop: 0 8px 28px rgb(24 24 40 / 0.14), 0 1px 3px rgb(24 24 40 / 0.08);
+  --bg: #e8e4dc;
+  --bg-glow: #f3f0ea;
+  --surface: #e1dcd2;
+  --raised: rgb(250 248 244 / 0.72);
+  --raised-solid: #f8f6f1;
+  --sunken: rgb(72 64 52 / 0.075);
+  --line: rgb(52 46 38 / 0.1);
+  --line-strong: rgb(52 46 38 / 0.2);
+  --fg: #25221d;
+  --muted: #615a4f;
+  --faint: #8a8376;
+  --accent: #8e6421;
+  --accent-hover: #7b561a;
+  --accent-fg: #fffaf1;
+  --accent-soft: rgb(142 100 33 / 0.11);
+  --over: #4d7640;
+  --over-soft: rgb(77 118 64 / 0.12);
+  --under: #ab4d3b;
+  --under-soft: rgb(171 77 59 / 0.11);
+  --danger: #b3343c;
+  --grain: 0.35;
+  --shadow-card: 0 1px 2px rgb(52 46 38 / 0.07), 0 1px 1px rgb(52 46 38 / 0.04);
+  --shadow-pop: 0 10px 30px rgb(52 46 38 / 0.18), 0 1px 3px rgb(52 46 38 / 0.1);
+
+  /* Project palette */
+  --p-brass: #8e6421;
+  --p-sage: #4f7a42;
+  --p-clay: #a4553a;
+  --p-slate: #4e6680;
+  --p-teal: #2f7a70;
+  --p-plum: #7a5690;
+  --p-rose: #a2495e;
+  --p-ochre: #8a7418;
+
+  /* z-index scale */
+  --z-nav: 20;
+  --z-pop: 30;
+  --z-toast: 40;
+  --z-grain: 50;
 }
 
+/* Dark: sand-slate. Kept in sync with the system-dark block below. */
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --bg: #1b1b1e;
-  --surface: #232327;
-  --raised: #2a2a2f;
-  --sunken: #161618;
-  --line: rgb(255 255 255 / 0.08);
-  --line-strong: rgb(255 255 255 / 0.17);
-  --fg: #ececef;
-  --muted: #a2a2ab;
-  --faint: #74747e;
-  --accent: #6b93f2;
-  --accent-hover: #82a5f5;
-  --accent-fg: #0d1220;
-  --accent-soft: rgb(107 147 242 / 0.16);
-  --over: #3fc796;
-  --over-soft: rgb(63 199 150 / 0.15);
-  --under: #f0925a;
-  --under-soft: rgb(240 146 90 / 0.15);
-  --danger: #f2707d;
-  --sidebar: rgb(30 30 34 / 0.5);
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
-  --shadow-pop: 0 10px 32px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
+  --bg: #1a1917;
+  --bg-glow: #262420;
+  --surface: #201f1c;
+  --raised: rgb(52 50 45 / 0.5);
+  --raised-solid: #282622;
+  --sunken: rgb(0 0 0 / 0.24);
+  --line: rgb(228 220 204 / 0.075);
+  --line-strong: rgb(228 220 204 / 0.16);
+  --fg: #ebe7df;
+  --muted: #aaa396;
+  --faint: #7c766b;
+  --accent: #cfa25e;
+  --accent-hover: #dcb271;
+  --accent-fg: #1c1813;
+  --accent-soft: rgb(207 162 94 / 0.14);
+  --over: #a2c192;
+  --over-soft: rgb(162 193 146 / 0.14);
+  --under: #de8672;
+  --under-soft: rgb(222 134 114 / 0.14);
+  --danger: #ea6a70;
+  --grain: 0.45;
+  --shadow-card: inset 0 1px 0 rgb(240 232 218 / 0.035), 0 1px 2px rgb(6 5 4 / 0.35);
+  --shadow-pop: 0 12px 36px rgb(6 5 4 / 0.55), 0 0 0 1px rgb(228 220 204 / 0.08);
+  --p-brass: #cfa25e;
+  --p-sage: #9dbd8c;
+  --p-clay: #d08a6c;
+  --p-slate: #93a7bc;
+  --p-teal: #72b5aa;
+  --p-plum: #b497c4;
+  --p-rose: #d993a3;
+  --p-ochre: #d4b85e;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --bg: #1b1b1e;
-    --surface: #232327;
-    --raised: #2a2a2f;
-    --sunken: #161618;
-    --line: rgb(255 255 255 / 0.08);
-    --line-strong: rgb(255 255 255 / 0.17);
-    --fg: #ececef;
-    --muted: #a2a2ab;
-    --faint: #74747e;
-    --accent: #6b93f2;
-    --accent-hover: #82a5f5;
-    --accent-fg: #0d1220;
-    --accent-soft: rgb(107 147 242 / 0.16);
-    --over: #3fc796;
-    --over-soft: rgb(63 199 150 / 0.15);
-    --under: #f0925a;
-    --under-soft: rgb(240 146 90 / 0.15);
-    --danger: #f2707d;
-    --sidebar: rgb(30 30 34 / 0.5);
-    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3);
-    --shadow-pop: 0 10px 32px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.06);
+    --bg: #1a1917;
+    --bg-glow: #262420;
+    --surface: #201f1c;
+    --raised: rgb(52 50 45 / 0.5);
+    --raised-solid: #282622;
+    --sunken: rgb(0 0 0 / 0.24);
+    --line: rgb(228 220 204 / 0.075);
+    --line-strong: rgb(228 220 204 / 0.16);
+    --fg: #ebe7df;
+    --muted: #aaa396;
+    --faint: #7c766b;
+    --accent: #cfa25e;
+    --accent-hover: #dcb271;
+    --accent-fg: #1c1813;
+    --accent-soft: rgb(207 162 94 / 0.14);
+    --over: #a2c192;
+    --over-soft: rgb(162 193 146 / 0.14);
+    --under: #de8672;
+    --under-soft: rgb(222 134 114 / 0.14);
+    --danger: #ea6a70;
+    --grain: 0.45;
+    --shadow-card: inset 0 1px 0 rgb(240 232 218 / 0.035), 0 1px 2px rgb(6 5 4 / 0.35);
+    --shadow-pop: 0 12px 36px rgb(6 5 4 / 0.55), 0 0 0 1px rgb(228 220 204 / 0.08);
+    --p-brass: #cfa25e;
+    --p-sage: #9dbd8c;
+    --p-clay: #d08a6c;
+    --p-slate: #93a7bc;
+    --p-teal: #72b5aa;
+    --p-plum: #b497c4;
+    --p-rose: #d993a3;
+    --p-ochre: #d4b85e;
   }
 }
 
-/* Window is transparent for vibrancy: only the sidebar shows through. */
 html,
 body,
 #root {
   height: 100%;
-  background: transparent;
 }
 body {
   margin: 0;
@@ -129,9 +168,22 @@ body {
   font-size: 13px;
   line-height: 1.45;
   color: var(--fg);
+  background-color: var(--bg);
+  background-image: radial-gradient(110% 60% at 50% -8%, var(--bg-glow), transparent 70%);
   -webkit-font-smoothing: antialiased;
   user-select: none;
   cursor: default;
+}
+/* Fine sand grain over the whole window; fixed so it does not scroll. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-grain);
+  pointer-events: none;
+  opacity: var(--grain);
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 input,
 textarea {
@@ -147,6 +199,100 @@ textarea {
 .tnum {
   font-variant-numeric: tabular-nums;
 }
+/* Display face: lining + tabular numerals so live timers do not jitter. */
+.font-display {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-optical-sizing: auto;
+}
+
+@keyframes ttt-breathe {
+  0%,
+  100% {
+    opacity: 0.15;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes ttt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+/* Onboarding steps slide in from the side they come from. */
+@keyframes ttt-step-next {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ttt-step-back {
+  from {
+    opacity: 0;
+    transform: translateX(-18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ttt-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ttt-toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes ttt-toast-timer {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+/* Staggered entry for page sections. */
+.rise > * {
+  animation: ttt-rise 420ms var(--ease-out-expo) both;
+}
+.rise > :nth-child(2) {
+  animation-delay: 50ms;
+}
+.rise > :nth-child(3) {
+  animation-delay: 100ms;
+}
+.rise > :nth-child(n + 4) {
+  animation-delay: 150ms;
+}
+
+kbd {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  line-height: 1;
+  padding: 3px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line-strong);
+  color: var(--faint);
+}
 
 *:focus-visible {
   outline: 2px solid var(--accent);
@@ -157,5 +303,9 @@ textarea {
   * {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
+  }
+  /* The toast timer bar is the dismiss clock, not decoration: keep its real length. */
+  .toast-timer {
+    animation-duration: var(--toast-duration) !important;
   }
 }

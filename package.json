@@ -1,26 +1,27 @@
 {
   "name": "ttt",
   "productName": "TTT",
-  "version": "0.1.0",
-  "description": "Work time tracker",
+  "version": "0.1.0-beta.1",
+  "description": "TTT, the Time Tracking Tool",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev --watch",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "rebuild": "electron-rebuild -f -w better-sqlite3"
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "helper": "sh build/make-helper.sh",
+    "dist": "npm run build && npm run helper && electron-builder --mac --publish never"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
-    "better-sqlite3": "^13.0.3",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "better-sqlite3": "^13.0.3"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.0",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@phosphor-icons/react": "^2.1.10",
     "@tailwindcss/vite": "^4.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.2",
@@ -28,10 +29,21 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^3.2.7"
+  },
+  "author": {
+    "name": "Nico Päller",
+    "email": "nico.paeller@gmail.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cayox/TTT.git"
   }
 }

@@ -1,20 +1,36 @@
 export interface WifiSettings {
   workSsids: string[]
+  /** name -> router MAC; matches when the SSID is hidden */
+  networkRouters: Record<string, string>
   graceMinutes: number
   autoTrack: boolean
 }
 
 export interface WifiWatcherOpts {
-  getSsid: () => Promise<string | null>
+  getNetwork: () => Promise<{ ssid: string | null; routerId: string | null }>
   getSettings: () => WifiSettings
   now: () => number
-  onStart: () => void
+  /** Called with the matched work network name so the session can go to its project. */
+  onStart: (name: string) => void
   onStop: (endTs: number) => void
   isRunning: () => boolean
   pollMs?: number
 }
 
 const norm = (s: string) => s.trim().toLowerCase()
+
+/** Work network name matching the current network, by SSID or else by router. */
+export function matchWorkNetwork(cfg: Pick<WifiSettings, 'workSsids' | 'networkRouters'>, net: { ssid: string | null; routerId: string | null }): string | null {
+  if (net.ssid) {
+    const byName = cfg.workSsids.find((w) => norm(w) === norm(net.ssid!))
+    if (byName) return byName
+  }
+  if (net.routerId) {
+    const byRouter = cfg.workSsids.find((w) => cfg.networkRouters[w]?.toLowerCase() === net.routerId!.toLowerCase())
+    if (byRouter) return byRouter
+  }
+  return null
+}
 
 export function createWifiWatcher(o: WifiWatcherOpts) {
   let timer: ReturnType<typeof setInterval> | null = null
@@ -27,16 +43,17 @@ export function createWifiWatcher(o: WifiWatcherOpts) {
     busy = true
     try {
       const cfg = o.getSettings()
-      const ssid = await o.getSsid()
+      const net = await o.getNetwork()
       const t = o.now()
-      const onWork = !!ssid && cfg.workSsids.some((w) => norm(w) === norm(ssid))
+      const match = matchWorkNetwork(cfg, net)
+      const onWork = match !== null
       const running = o.isRunning()
       if (!running) startedByWatcher = false
       if (onWork) {
         lastSeen = t
         if (cfg.autoTrack && !running) {
           startedByWatcher = true
-          o.onStart()
+          o.onStart(match!)
         }
       } else if (startedByWatcher && running && lastSeen !== null) {
         if (t - lastSeen >= cfg.graceMinutes * 60000) {

@@ -15,7 +15,7 @@ export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
   tone?: Tone
 }
 export function Badge({ tone = 'neutral', className, ...rest }: BadgeProps) {
-  return <span {...rest} className={cx('tnum inline-flex h-5 items-center rounded-full px-2 text-[11px] font-medium', toneBadge[tone], className)} />
+  return <span {...rest} className={cx('tnum inline-flex h-5 items-center rounded-[5px] px-1.5 text-[11px] font-medium', toneBadge[tone], className)} />
 }
 
 export interface StatProps {
@@ -25,14 +25,18 @@ export interface StatProps {
   delta?: string
   deltaTone?: Tone
   hint?: string
+  /** Colors the main value. */
+  valueTone?: Tone
+  size?: 'sm' | 'md' | 'lg'
   className?: string
 }
-export function Stat({ label, value, delta, deltaTone = 'neutral', hint, className }: StatProps) {
+const valueSize = { sm: 'text-[19px]', md: 'text-[26px]', lg: 'text-[44px]' }
+export function Stat({ label, value, delta, deltaTone = 'neutral', hint, valueTone = 'neutral', size = 'md', className }: StatProps) {
   return (
-    <div className={cx('flex flex-col gap-1', className)}>
+    <div className={cx('flex flex-col', size === 'lg' ? 'gap-2' : 'gap-1', className)}>
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="flex items-baseline gap-2">
-        <span className="tnum font-display text-[26px] font-semibold leading-none tracking-tight">{value}</span>
+        <span className={cx('font-display font-semibold leading-none tracking-tight', valueSize[size], toneText[valueTone])}>{value}</span>
         {delta && <span className={cx('tnum text-xs font-medium', toneText[deltaTone])}>{delta}</span>}
       </div>
       {hint && <div className="text-xs text-faint">{hint}</div>}

@@ -220,3 +220,19 @@ export function weeklyTotals(days: DayStat[], weekStart: 0 | 6 = 0): WeekTotal[]
   }
   return [...map.values()].sort((a, b) => (a.weekStart < b.weekStart ? -1 : 1))
 }
+
+export interface ProjectTotal {
+  projectId: number | null
+  minutes: number
+}
+
+/** Minutes per project inside [fromTs, toTs), clipping sessions at the edges. Sorted by minutes, descending. */
+export function projectTotals(sessions: Session[], fromTs: number, toTs: number, now: number): ProjectTotal[] {
+  const acc = new Map<number | null, number>()
+  for (const s of sessions) {
+    const a = Math.max(s.startTs, fromTs)
+    const b = Math.min(s.endTs ?? now, toTs)
+    if (b > a) acc.set(s.projectId, (acc.get(s.projectId) ?? 0) + (b - a) / 60000)
+  }
+  return [...acc.entries()].map(([projectId, minutes]) => ({ projectId, minutes })).sort((x, y) => y.minutes - x.minutes)
+}

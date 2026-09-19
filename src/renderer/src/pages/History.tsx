@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CaretDown, CaretLeft, CaretRight, PencilSimple, Plus, Trash } from '@phosphor-icons/react'
-import { Badge, Button, Card, IconButton, Input, NumberField, Segmented, TimeField, cx } from '../components/ui'
+import { Badge, Button, Card, IconButton, NumberField, Page, ProjectLabel, Segmented, cx } from '../components/ui'
+import { SessionEditor } from '../components/SessionEditor'
+import { ExportMenu } from '../components/ExportMenu'
+import { errorText, useToast } from '../lib/toast'
+import { useSessionActions } from '../lib/sessions'
+import { isTyping, useTracker } from '../lib/tracker'
 import type { Tone } from '../components/ui'
 import { addDays, dateKey, dayBalance, startOfDay, weekdayIndex, workedMinutesByDay } from '../../../shared/time'
 import type { DayStat } from '../../../shared/time'
@@ -13,42 +18,11 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const KIND_LABEL: Record<DayKind, string> = { vacation: 'Vacation', sick: 'Sick', holiday: 'Holiday', custom: 'Custom' }
 
-function tsFor(date: string, hhmm: string): number {
-  const [y, m, d] = date.split('-').map(Number)
-  const [h, mi] = hhmm.split(':').map(Number)
-  return new Date(y, m - 1, d, h, mi).getTime()
-}
 const fmtDay = (date: string): string => {
   const [, m, d] = date.split('-').map(Number)
   return `${WD[weekdayIndex(date)]}, ${d} ${MONTHS[m - 1].slice(0, 3)}`
 }
 const deltaTone = (n: number): Tone => (n > 0 ? 'over' : n < 0 ? 'under' : 'neutral')
-
-function SessionEditor({
-  date, initial, onSave, onCancel
-}: {
-  date: string
-  initial?: Session
-  onSave: (startTs: number, endTs: number, note: string) => Promise<void>
-  onCancel: () => void
-}) {
-  const [start, setStart] = useState(initial ? formatClock(initial.startTs) : '09:00')
-  const [end, setEnd] = useState(initial?.endTs ? formatClock(initial.endTs) : '17:00')
-  const [note, setNote] = useState(initial?.note ?? '')
-  const [busy, setBusy] = useState(false)
-  const error = !start || !end ? 'Enter both times' : tsFor(date, end) <= tsFor(date, start) ? 'End must be after start' : undefined
-  return (
-    <div className="flex flex-wrap items-start gap-3 rounded-md bg-sunken p-3">
-      <div className="w-28"><TimeField label="Start" value={start} onChange={setStart} /></div>
-      <div className="w-28"><TimeField label="End" value={end} onChange={setEnd} error={error} /></div>
-      <div className="min-w-48 flex-1"><Input label="Note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" /></div>
-      <div className="flex items-center gap-2 pt-[22px]">
-        <Button variant="primary" disabled={!!error || busy} onClick={async () => { setBusy(true); await onSave(tsFor(date, start), tsFor(date, end), note); setBusy(false) }}>Save</Button>
-        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-      </div>
-    </div>
-  )
-}
 
 function OverrideControl({ date, override, schedule, onSet, onClear }: {
   date: string
@@ -88,13 +62,35 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
   onToggle: () => void
   refetch: () => Promise<void>
 }) {
+  const { projectById } = useTracker()
   const [editing, setEditing] = useState<number | 'new' | null>(null)
-  const [confirmId, setConfirmId] = useState<number | null>(null)
+  const act = useSessionActions(refetch)
+  const toast = useToast()
   const quiet = stat.expectedMin === 0 && stat.workedMin === 0 && !override
   const actual = stat.credited ? Math.max(0, stat.workedMin) : stat.workedMin
-  const run = async (fn: () => Promise<unknown>): Promise<void> => { await fn(); await refetch() }
+  const run = async (fn: () => Promise<unknown>, fail: string): Promise<boolean> => {
+    try {
+      await fn()
+      await refetch()
+      return true
+    } catch (e) {
+      toast.error(fail, { description: errorText(e) })
+      return false
+    }
+  }
+  // Day markers: apply, then offer Undo back to whatever was there before.
+  const restore = (prev: DayOverride | undefined) => () =>
+    void run(() => (prev ? window.api['overrides:set'](prev) : window.api['overrides:remove'](stat.date)), "Couldn't undo")
+  const setMarker = async (o: DayOverride): Promise<void> => {
+    if (await run(() => window.api['overrides:set'](o), "Couldn't mark the day"))
+      toast.success(`${fmtDay(stat.date)} marked as ${KIND_LABEL[o.kind].toLowerCase()}`, { id: `marker-${stat.date}`, actions: [{ label: 'Undo', onClick: restore(override) }] })
+  }
+  const clearMarker = async (): Promise<void> => {
+    if (await run(() => window.api['overrides:remove'](stat.date), "Couldn't clear the day"))
+      toast.success(`${fmtDay(stat.date)} is a normal day again`, { id: `marker-${stat.date}`, actions: [{ label: 'Undo', onClick: restore(override) }] })
+  }
   return (
-    <div className={cx('border-t border-line first:border-t-0', quiet && !open && 'opacity-55')}>
+    <div id={`day-${stat.date}`} className={cx('scroll-mt-24 border-t border-line first:border-t-0', quiet && !open && 'opacity-55', open && 'bg-sunken/60')}>
       <button type="button" onClick={onToggle} aria-expanded={open}
         className="no-drag flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-sunken">
         <CaretDown size={14} className={cx('shrink-0 text-faint transition-transform duration-150', !open && '-rotate-90')} />
@@ -114,38 +110,31 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
             editing === s.id ? (
               <SessionEditor key={s.id} date={stat.date} initial={s}
                 onCancel={() => setEditing(null)}
-                onSave={async (a, b, note) => { await run(() => window.api['sessions:update'](s.id, { startTs: a, endTs: b, note })); setEditing(null) }} />
+                onSave={async (d) => { if (await act.update(s.id, d)) setEditing(null) }} />
             ) : (
               <div key={s.id} className="flex items-center gap-3 text-[13px]">
-                <span className="tnum w-28 shrink-0">{formatClock(s.startTs)} - {s.endTs ? formatClock(s.endTs) : 'running'}</span>
+                <span className="tnum w-28 shrink-0">{formatClock(s.startTs)}–{s.endTs ? formatClock(s.endTs) : 'running'}</span>
                 <span className="tnum w-14 shrink-0 text-muted">{s.endTs ? formatDuration((s.endTs - s.startTs) / 60000) : ''}</span>
-                <Badge>{s.source === 'wifi' ? 'Wi-Fi' : 'Manual'}</Badge>
+                <ProjectLabel project={projectById(s.projectId)} className="w-36 shrink-0" />
+                {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
                 <span className="min-w-0 flex-1 truncate text-muted">{s.note}</span>
-                {confirmId === s.id ? (
-                  <span className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted">Delete?</span>
-                    <Button size="sm" variant="danger" onClick={() => run(() => window.api['sessions:remove'](s.id))}>Delete</Button>
-                    <Button size="sm" variant="ghost" onClick={() => setConfirmId(null)}>Keep</Button>
-                  </span>
-                ) : (
-                  <span className="flex">
-                    {s.endTs != null && <IconButton size="sm" label="Edit session" onClick={() => setEditing(s.id)}><PencilSimple size={14} /></IconButton>}
-                    <IconButton size="sm" label="Delete session" onClick={() => setConfirmId(s.id)}><Trash size={14} /></IconButton>
-                  </span>
-                )}
+                <span className="flex">
+                  <IconButton size="sm" label="Edit session" onClick={() => setEditing(s.id)}><PencilSimple size={14} /></IconButton>
+                  <IconButton size="sm" label="Delete session" onClick={() => void act.remove(s)}><Trash size={14} /></IconButton>
+                </span>
               </div>
             )
           )}
           {editing === 'new' ? (
             <SessionEditor date={stat.date} onCancel={() => setEditing(null)}
-              onSave={async (a, b, note) => { await run(() => window.api['sessions:add']({ startTs: a, endTs: b, source: 'manual', note })); setEditing(null) }} />
+              onSave={async (d) => { if (await act.add({ ...d, source: 'manual' })) setEditing(null) }} />
           ) : (
             <div><Button size="sm" icon={<Plus size={13} />} onClick={() => setEditing('new')}>Add session</Button></div>
           )}
           <div className="border-t border-line pt-3">
             <OverrideControl date={stat.date} override={override} schedule={schedule}
-              onSet={(o) => run(() => window.api['overrides:set'](o))}
-              onClear={() => run(() => window.api['overrides:remove'](stat.date))} />
+              onSet={setMarker}
+              onClear={clearMarker} />
           </div>
         </div>
       )}
@@ -167,15 +156,23 @@ export function HistoryPage() {
   const nextFirst = dateKey(new Date(ym.y, ym.m + 1, 1).getTime())
   const last = addDays(nextFirst, -1)
 
+  const toast = useToast()
   const refetch = useCallback(async () => {
-    const [s, o, sch, st] = await Promise.all([
-      window.api['sessions:list'](startOfDay(first) - 86400000, startOfDay(nextFirst)),
-      window.api['overrides:list'](first, last),
-      window.api['schedule:get'](),
-      window.api['settings:get']()
-    ])
-    setSessions(s); setOverrides(o); setSchedule(sch); setSettings(st); setLoaded(true)
-  }, [first, nextFirst, last])
+    try {
+      const [s, o, sch, st] = await Promise.all([
+        window.api['sessions:list'](startOfDay(first) - 86400000, startOfDay(nextFirst)),
+        window.api['overrides:list'](first, last),
+        window.api['schedule:get'](),
+        window.api['settings:get']()
+      ])
+      setSessions(s); setOverrides(o); setSchedule(sch); setSettings(st); setLoaded(true)
+      toast.dismiss('history-load')
+    } catch (e) {
+      toast.error("Couldn't load this month", { id: 'history-load', description: errorText(e), duration: null, actions: [{ label: 'Try again', onClick: () => void refetchRef.current() }] })
+    }
+  }, [first, nextFirst, last, toast])
+  const refetchRef = useRef(refetch)
+  refetchRef.current = refetch
   useEffect(() => { void refetch() }, [refetch])
 
   const today = dateKey(Date.now())
@@ -201,52 +198,155 @@ export function HistoryPage() {
   }, [sessions, overrides, schedule, settings, first, last, today])
 
   const isCurrent = ym.y === now.getFullYear() && ym.m === now.getMonth()
-  const shift = (n: number): void => { setOpenDate(null); const d = new Date(ym.y, ym.m + n, 1); setYm({ y: d.getFullYear(), m: d.getMonth() }) }
+  const shift = useCallback((n: number): void => {
+    setOpenDate(null)
+    setYm((c) => {
+      const d = new Date(c.y, c.m + n, 1)
+      return { y: d.getFullYear(), m: d.getMonth() }
+    })
+  }, [])
   const ovMap = new Map(overrides.map((o) => [o.date, o]))
+  const monthDelta = monthWorked - monthExpected
+
+  const isCurrentRef = useRef(isCurrent)
+  isCurrentRef.current = isCurrent
+
+  // ←/→ switch months when nothing text-like is focused.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e)) return
+      if ((e.target as HTMLElement | null)?.closest('figure, [role="radiogroup"]')) return
+      if (e.key === 'ArrowLeft') shift(-1)
+      if (e.key === 'ArrowRight' && !isCurrentRef.current) shift(1)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [shift])
+  const openDay = (date: string): void => {
+    setOpenDate(date)
+    requestAnimationFrame(() => document.getElementById(`day-${date}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }
 
   return (
-    <div className="mx-auto flex max-w-3xl flex-col gap-5 p-8">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl font-semibold tracking-tight">{MONTHS[ym.m]} {ym.y}</h1>
-          <p className="tnum mt-1 text-[13px] text-muted">
-            {formatDuration(monthWorked)} worked of {formatDuration(monthExpected)}
-            {monthExpected > 0 || monthWorked > 0 ? <> · <span className={cx(monthWorked - monthExpected > 0 ? 'text-over' : monthWorked - monthExpected < 0 ? 'text-under' : '')}>{formatDelta(monthWorked - monthExpected)}</span></> : null}
-          </p>
-        </div>
+    <Page
+      title={`${MONTHS[ym.m]} ${ym.y}`}
+      subtitle={
+        <>
+          {formatDuration(monthWorked)} worked of {formatDuration(monthExpected)}
+          {monthExpected > 0 || monthWorked > 0 ? <> · <span className={cx(monthDelta > 0 ? 'text-over' : monthDelta < 0 ? 'text-under' : '')}>{formatDelta(monthDelta)}</span></> : null}
+        </>
+      }
+      actions={
         <div className="flex items-center gap-1.5">
-          <IconButton label="Previous month" onClick={() => shift(-1)}><CaretLeft size={16} /></IconButton>
-          <Button disabled={isCurrent} onClick={() => { setOpenDate(null); setYm({ y: now.getFullYear(), m: now.getMonth() }) }}>Today</Button>
-          <IconButton label="Next month" onClick={() => shift(1)}><CaretRight size={16} /></IconButton>
+          <ExportMenu year={ym.y} month={ym.m} label={`${MONTHS[ym.m]} ${ym.y}`} />
+          <span aria-hidden className="mx-1 h-5 w-px bg-line-strong" />
+          <IconButton label="Previous month (←)" onClick={() => shift(-1)}><CaretLeft size={16} /></IconButton>
+          <Button disabled={isCurrent} onClick={() => { setOpenDate(null); setYm({ y: now.getFullYear(), m: now.getMonth() }) }}>This month</Button>
+          <IconButton label="Next month (→)" disabled={isCurrent} onClick={() => shift(1)}><CaretRight size={16} /></IconButton>
         </div>
-      </header>
-
+      }
+    >
       {!loaded ? (
-        <div className="flex flex-col gap-2" aria-busy="true">
-          {[0, 1, 2, 3].map((i) => <div key={i} className="h-11 animate-pulse rounded-md bg-sunken" />)}
+        <div className="flex animate-pulse flex-col gap-4" aria-busy="true">
+          <div className="h-56 rounded-xl bg-sunken" />
+          {[0, 1, 2].map((i) => <div key={i} className="h-11 rounded-md bg-sunken" />)}
         </div>
       ) : weeks.length === 0 ? (
-        <Card><p className="py-10 text-center text-[13px] text-muted">Nothing to show yet for this month.</p></Card>
+        <Card><p className="py-10 text-center text-[13px] text-muted">Nothing to show for this month yet.</p></Card>
       ) : (
-        weeks.map((w) => (
-          <Card key={w.weekStart} padded={false}
-            title={<span className="px-0">Week of {fmtDay(w.weekStart)}</span>}
-            action={
-              <span className="tnum flex items-center gap-2 text-xs text-muted">
-                {formatDuration(w.worked)} / {formatDuration(w.expected)}
-                <Badge tone={deltaTone(w.worked - w.expected)}>{formatDelta(w.worked - w.expected)}</Badge>
-              </span>
-            }>
-            <div className="mt-3">
-              {w.days.map((s) => (
-                <DayRow key={s.date} stat={s} override={ovMap.get(s.date)} schedule={schedule}
-                  sessions={sessions.filter((x) => dateKey(x.startTs) === s.date).sort((a, b) => a.startTs - b.startTs)}
-                  open={openDate === s.date} onToggle={() => setOpenDate(openDate === s.date ? null : s.date)} refetch={refetch} />
-              ))}
-            </div>
+        <>
+          <MonthGrid y={ym.y} m={ym.m} days={weeks.flatMap((w) => w.days)} today={today} weekStart={settings.weekStart} overrides={ovMap} selected={openDate} onSelect={openDay} />
+          <Card padded={false} className="overflow-clip">
+            {weeks.map((w) => (
+              <section key={w.weekStart} aria-label={`Week of ${fmtDay(w.weekStart)}`}>
+                <header className="sticky top-0 flex items-center justify-between border-b border-t border-line bg-raised-solid/95 px-4 py-2 backdrop-blur first:border-t-0" style={{ zIndex: 1 }}>
+                  <h2 className="text-xs font-medium text-muted">Week of {fmtDay(w.weekStart)}</h2>
+                  <span className="tnum flex items-center gap-2 text-xs text-muted">
+                    {formatDuration(w.worked)} / {formatDuration(w.expected)}
+                    <Badge tone={deltaTone(w.worked - w.expected)}>{formatDelta(w.worked - w.expected)}</Badge>
+                  </span>
+                </header>
+                {w.days.map((s) => (
+                  <DayRow key={s.date} stat={s} override={ovMap.get(s.date)} schedule={schedule}
+                    sessions={sessions.filter((x) => dateKey(x.startTs) === s.date).sort((a, b) => a.startTs - b.startTs)}
+                    open={openDate === s.date} onToggle={() => setOpenDate(openDate === s.date ? null : s.date)} refetch={refetch} />
+                ))}
+              </section>
+            ))}
           </Card>
-        ))
+        </>
       )}
-    </div>
+    </Page>
+  )
+}
+
+/** Calendar heatmap: each day tinted by how far over or under target it landed. */
+function MonthGrid({ y, m, days, today, weekStart, overrides, selected, onSelect }: {
+  y: number
+  m: number
+  days: DayStat[]
+  today: string
+  weekStart: 0 | 6
+  overrides: Map<string, DayOverride>
+  selected: string | null
+  onSelect: (date: string) => void
+}) {
+  const byDate = new Map(days.map((d) => [d.date, d]))
+  const first = `${y}-${pad(m + 1)}-01`
+  const lead = (weekdayIndex(first) - weekStart + 7) % 7
+  const count = new Date(y, m + 1, 0).getDate()
+  const cells: (string | null)[] = [...Array(lead).fill(null), ...Array.from({ length: count }, (_, i) => `${y}-${pad(m + 1)}-${pad(i + 1)}`)]
+  const heads = weekStart === 6 ? ['Sun', ...WD.slice(0, 6)] : WD
+  const maxAbs = Math.max(60, ...days.filter((d) => !d.credited).map((d) => Math.abs(d.deltaMin)))
+
+  const fill = (d: DayStat | undefined, date: string): { bg?: string; cls: string } => {
+    if (!d) return { cls: date > today ? 'text-faint/60' : 'text-faint' }
+    if (overrides.has(date) || d.credited) return { cls: 'bg-accent-soft text-accent' }
+    if (d.expectedMin === 0 && d.workedMin === 0) return { cls: 'text-faint' }
+    const t = Math.min(1, Math.abs(d.deltaMin) / maxAbs)
+    const col = d.deltaMin >= 0 ? 'var(--over)' : 'var(--under)'
+    return { bg: `color-mix(in oklab, ${col} ${Math.round(14 + t * 46)}%, transparent)`, cls: 'text-fg' }
+  }
+
+  return (
+    <Card>
+      <div className="grid gap-6 md:grid-cols-[1fr_auto]">
+        <div role="grid" aria-label="Month overview" className="grid grid-cols-7 gap-1.5">
+          {heads.map((h) => <div key={h} role="columnheader" className="pb-1 text-center text-[11px] text-faint">{h}</div>)}
+          {cells.map((date, i) => {
+            if (!date) return <div key={`e${i}`} />
+            const d = byDate.get(date)
+            const f = fill(d, date)
+            const future = date > today
+            return (
+              <button
+                key={date}
+                type="button"
+                role="gridcell"
+                disabled={future}
+                onClick={() => onSelect(date)}
+                aria-label={`${fmtDay(date)}${d ? `, ${formatDuration(d.workedMin)} worked, ${formatDelta(d.deltaMin)}` : ''}`}
+                title={d ? `${fmtDay(date)} · ${formatDuration(d.workedMin)} (${formatDelta(d.deltaMin)})` : fmtDay(date)}
+                className={cx(
+                  'no-drag tnum grid h-9 place-items-center rounded-md text-xs font-medium transition-[transform,box-shadow] duration-150 enabled:hover:scale-105 enabled:active:scale-95',
+                  f.cls,
+                  date === today && 'ring-1 ring-accent',
+                  selected === date && 'ring-2 ring-fg/70'
+                )}
+                style={f.bg ? { background: f.bg } : undefined}
+              >
+                {Number(date.slice(8))}
+              </button>
+            )
+          })}
+        </div>
+        <ul className="flex flex-row flex-wrap gap-x-5 gap-y-2 self-end text-xs text-muted md:flex-col">
+          <li className="flex items-center gap-2"><span className="size-3 rounded-[3px] bg-over/60" />Over target</li>
+          <li className="flex items-center gap-2"><span className="size-3 rounded-[3px] bg-under/60" />Under target</li>
+          <li className="flex items-center gap-2"><span className="size-3 rounded-[3px] bg-accent-soft ring-1 ring-accent/40" />Day off</li>
+          <li className="flex items-center gap-2"><span className="size-3 rounded-[3px] ring-1 ring-accent" />Today</li>
+        </ul>
+      </div>
+    </Card>
   )
 }

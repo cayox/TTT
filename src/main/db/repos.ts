@@ -2,7 +2,10 @@ import type { DB } from './index'
 import {
   DEFAULT_SCHEDULE,
   DEFAULT_SETTINGS,
+  PROJECT_COLORS,
   type DayOverride,
+  type Project,
+  type ProjectColor,
   type Schedule,
   type Session,
   type SessionSource,
@@ -15,6 +18,7 @@ interface SessionRow {
   end_ts: number | null
   source: string
   note: string
+  project_id: number | null
 }
 
 const toSession = (r: SessionRow): Session => ({
@@ -22,7 +26,21 @@ const toSession = (r: SessionRow): Session => ({
   startTs: r.start_ts,
   endTs: r.end_ts,
   source: r.source as SessionSource,
-  note: r.note
+  note: r.note,
+  projectId: r.project_id
+})
+
+interface ProjectRow {
+  id: number
+  name: string
+  color: string
+  archived: number
+}
+const toProject = (r: ProjectRow): Project => ({
+  id: r.id,
+  name: r.name,
+  color: (PROJECT_COLORS as readonly string[]).includes(r.color) ? (r.color as ProjectColor) : 'brass',
+  archived: !!r.archived
 })
 
 export function createRepos(db: DB) {
@@ -38,13 +56,14 @@ export function createRepos(db: DB) {
         .get() as SessionRow | undefined
       return r ? toSession(r) : null
     },
-    /** Returns the existing open session if one is already running. */
-    start(source: SessionSource, ts: number = Date.now()): Session {
+    /** Returns the existing open session if one is already running. projectId undefined = default project. */
+    start(source: SessionSource, ts: number = Date.now(), projectId?: number | null): Session {
       const cur = sessions.current()
       if (cur) return cur
+      const pid = projectId === undefined ? projects.defaultId() : projectId
       const info = db
-        .prepare("INSERT INTO sessions (start_ts, end_ts, source, note) VALUES (?, NULL, ?, '')")
-        .run(ts, source)
+        .prepare("INSERT INTO sessions (start_ts, end_ts, source, note, project_id) VALUES (?, NULL, ?, '', ?)")
+        .run(ts, source, pid)
       return getSession(Number(info.lastInsertRowid))!
     },
     stop(ts: number = Date.now()): Session | null {
@@ -61,21 +80,22 @@ export function createRepos(db: DB) {
         .all(toTs, fromTs) as SessionRow[]
       return rows.map(toSession)
     },
-    add(s: { startTs: number; endTs: number | null; source: SessionSource; note?: string }): Session {
+    add(s: { startTs: number; endTs: number | null; source: SessionSource; note?: string; projectId?: number | null }): Session {
       const info = db
-        .prepare('INSERT INTO sessions (start_ts, end_ts, source, note) VALUES (?, ?, ?, ?)')
-        .run(s.startTs, s.endTs, s.source, s.note ?? '')
+        .prepare('INSERT INTO sessions (start_ts, end_ts, source, note, project_id) VALUES (?, ?, ?, ?, ?)')
+        .run(s.startTs, s.endTs, s.source, s.note ?? '', s.projectId === undefined ? projects.defaultId() : s.projectId)
       return getSession(Number(info.lastInsertRowid))!
     },
     update(id: number, patch: Partial<Omit<Session, 'id'>>): Session | null {
       const cur = getSession(id)
       if (!cur) return null
       const n = { ...cur, ...patch }
-      db.prepare('UPDATE sessions SET start_ts=?, end_ts=?, source=?, note=? WHERE id=?').run(
+      db.prepare('UPDATE sessions SET start_ts=?, end_ts=?, source=?, note=?, project_id=? WHERE id=?').run(
         n.startTs,
         n.endTs,
         n.source,
         n.note,
+        n.projectId,
         id
       )
       return getSession(id)
@@ -154,7 +174,53 @@ export function createRepos(db: DB) {
     }
   }
 
-  return { sessions, schedule, overrides, settings }
+  const projects = {
+    list(includeArchived = true): Project[] {
+      const rows = db
+        .prepare(`SELECT * FROM projects ${includeArchived ? '' : 'WHERE archived = 0'} ORDER BY archived, id`)
+        .all() as ProjectRow[]
+      return rows.map(toProject)
+    },
+    get(id: number): Project | null {
+      const r = db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
+      return r ? toProject(r) : null
+    },
+    add(p: { name: string; color: ProjectColor }): Project {
+      const info = db.prepare('INSERT INTO projects (name, color) VALUES (?, ?)').run(p.name.trim() || 'Untitled', p.color)
+      return projects.get(Number(info.lastInsertRowid))!
+    },
+    update(id: number, patch: Partial<Omit<Project, 'id'>>): Project | null {
+      const cur = projects.get(id)
+      if (!cur) return null
+      const n = { ...cur, ...patch }
+      db.prepare('UPDATE projects SET name=?, color=?, archived=? WHERE id=?').run(n.name.trim() || cur.name, n.color, n.archived ? 1 : 0, id)
+      return projects.get(id)
+    },
+    /** Deletes the project; its sessions become unassigned (FK ON DELETE SET NULL). */
+    remove(id: number): void {
+      db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+    },
+    /** Session count per project id, to decide between archive and delete. */
+    usage(): Record<number, number> {
+      const rows = db.prepare('SELECT project_id AS p, COUNT(*) AS n FROM sessions WHERE project_id IS NOT NULL GROUP BY project_id').all() as { p: number; n: number }[]
+      return Object.fromEntries(rows.map((r) => [r.p, r.n]))
+    },
+    /** Configured default if it is still active, else the first active project, else null. */
+    defaultId(): number | null {
+      const want = settings.get().defaultProjectId
+      const active = projects.list(false)
+      return active.find((p) => p.id === want)?.id ?? active[0]?.id ?? null
+    },
+    /** Project for a Wi-Fi started session on this SSID (case-insensitive), falling back to the default. */
+    forSsid(ssid: string): number | null {
+      const map = settings.get().ssidProjects
+      const key = Object.keys(map).find((k) => k.trim().toLowerCase() === ssid.trim().toLowerCase())
+      const id = key !== undefined ? map[key] : undefined
+      return id !== undefined && projects.get(id) && !projects.get(id)!.archived ? id : projects.defaultId()
+    }
+  }
+
+  return { sessions, schedule, overrides, settings, projects }
 }
 
 export type Repos = ReturnType<typeof createRepos>
