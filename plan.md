@@ -56,9 +56,9 @@ src/
 - [x] 0.4 `.gitignore`, README, npm scripts (dev, build, test, rebuild)
 
 ### Phase 1: Core tracking (parallelizable: A/B/C)
-- [ ] 1.A Data layer: repositories for sessions, schedule, overrides, settings + tests
-- [ ] 1.B Shared logic: overtime/undertime math, range stats (7/30/90/365/all), tests
-- [ ] 1.C Design system: tokens, dark/light/system theme, primitives (Button, Card, Input, Toggle, Segmented, Stat, Chart shell). Run the design-taste skill first
+- [x] 1.A Data layer: repositories for sessions, schedule, overrides, settings + tests
+- [x] 1.B Shared logic: overtime/undertime math, range stats (7/30/90/365/all), tests
+- [x] 1.C Design system: tokens, dark/light/system theme, primitives (Button, Card, Input, Toggle, Segmented, Stat, Chart shell). Run the design-taste skill first
 - [ ] 1.D Integrate: start/stop/pause session via IPC
 
 ### Phase 2: Screens (parallelizable after Phase 1)
@@ -93,3 +93,6 @@ src/
 ## Session Log
 - 2026-09-19: Questions answered (macOS, TS+electron-vite, SQLite, tray+auto). Plan written. No code yet.
 - 2026-09-19: Phase 0 done (electron-vite scaffold, Tailwind v4, Vitest, SQLite+migrations, typed IPC ping). Notes: vite pinned ^7 + plugin-react ^5 (electron-vite peer); better-sqlite3 13 ships prebuilds for Electron+Node, no rebuild step needed. Shared types in src/shared/types.ts. Next: Phase 1 (A/B/C in parallel).
+- 2026-09-19: 1.A done: src/main/db/repos.ts createRepos(db) -> {sessions, schedule, overrides, settings} + repos.test.ts.
+- 2026-09-19: 1.B done: src/shared/time.ts (+stats.ts re-export, format.ts, time.test.ts); credited day => worked=max(actual,expected), expected=override.expectedMinutes ?? schedule.
+- 2026-09-19: 1.C done: index.css tokens (bg/surface/raised/sunken/line/fg/muted/faint/accent/over/under/danger/sidebar, radius, shadow-card/pop, SF font stack; dark via html[data-theme] or system fallback), lib/theme.ts (applyTheme, useTheme, getStoredTheme), components/ui/* (Button, IconButton, Card, Input, NumberField, TimeField, Toggle, Segmented, Stat, Badge, ProgressRing, ProgressBar, Sidebar, AppShell, BarChart, Gallery temp; barrel index.ts). Added dep @phosphor-icons/react. Call applyTheme(getStoredTheme()) at startup; wrap App in <AppShell>.

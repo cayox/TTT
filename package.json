@@ -14,6 +14,7 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "better-sqlite3": "^13.0.3",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
