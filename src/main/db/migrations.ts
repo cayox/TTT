@@ -15,5 +15,8 @@ export const migrations: string[] = [
     expected_minutes INTEGER
   );
   CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  `,
+  `
+  CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   `
 ]

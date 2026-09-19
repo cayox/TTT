@@ -6,6 +6,6 @@ describe('migrations', () => {
     const db = openDb(':memory:')
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
     expect(tables.map((t) => t.name)).toEqual(expect.arrayContaining(['sessions', 'schedule', 'day_overrides', 'settings']))
-    expect(db.pragma('user_version', { simple: true })).toBe(1)
+    expect(db.pragma('user_version', { simple: true })).toBe(2)
   })
 })

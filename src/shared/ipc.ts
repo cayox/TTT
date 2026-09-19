@@ -48,3 +48,6 @@ export const CHANNELS: Channel[] = [
   'settings:get', 'settings:set',
   'stats:range', 'stats:balance'
 ]
+
+/** Push events main → renderer. */
+export const EVENT_SESSIONS_CHANGED = 'sessions:changed'

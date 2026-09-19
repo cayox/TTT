@@ -62,19 +62,20 @@ src/
 - [x] 1.D Integrate: start/stop/pause session via IPC
 
 ### Phase 2: Screens (parallelizable after Phase 1)
-- [ ] 2.1 Today: big timer, start/stop, progress vs. expected, running balance
-- [ ] 2.2 Schedule/Settings: per-weekday expected hours editor, theme, wifi SSID, grace, launch at login
-- [ ] 2.3 History: day list, edit/add/delete sessions, per-day over/under badge
-- [ ] 2.4 Stats: 7d / 30d / 90d / 1y / all, with total, average/day, overtime, best day, chart
+- [x] 2.1 Today: big timer, start/stop, progress vs. expected, running balance
+- [x] 2.2 Schedule/Settings: per-weekday expected hours editor, theme, wifi SSID, grace, launch at login
+- [x] 2.3 History: day list, edit/add/delete sessions, per-day over/under badge
+- [x] 2.4 Stats: 7d / 30d / 90d / 1y / all, with total, average/day, overtime, best day, chart
 
 ### Phase 3: Tray & background
-- [ ] 3.1 Tray icon + live elapsed title, quick start/stop menu
-- [ ] 3.2 Close-to-tray, launch at login, single instance
-- [ ] 3.3 Crash safety: recover open session on relaunch
+- [x] 3.1 Tray icon + live elapsed title, quick start/stop menu
+- [x] 3.2 Close-to-tray, launch at login, single instance
+- [x] 3.3 Crash safety: recover open session on relaunch
 
 ### Phase 4: Wifi auto-tracking
-- [ ] 4.1 Spike: reliable SSID read on current macOS (document result here)
-- [ ] 4.2 Watcher with debounce + grace period, source='wifi' sessions
+- [x] 4.1 Spike: reliable SSID read on current macOS (document result here)
+  - **Spike result (Darwin 25):** `networksetup -getairportnetwork en0` wrongly reports "not associated"; `ipconfig getsummary en0` and `system_profiler SPAirPortDataType` return `<redacted>` for SSID/BSSID; `wdutil info` needs sudo. So nothing works without Location permission. Fallback: CoreWLAN Swift helper at src/main/wifi/helper/ssid.swift (build note inside; needs NSLocationUsageDescription in Info.plist, Location permission granted to the app, and com.apple.security.personal-information.location entitlement if sandboxed/signed hardened). src/main/wifi/ssid.ts tries networksetup, then the helper (TTT_SSID_HELPER or Resources/ssid-helper).
+- [x] 4.2 Watcher with debounce + grace period, source='wifi' sessions
 - [ ] 4.3 Settings UI: detect current network, choose work SSID(s), status indicator
 - [ ] 4.4 Notifications on auto start/stop
 
@@ -97,3 +98,9 @@ src/
 - 2026-09-19: 1.B done: src/shared/time.ts (+stats.ts re-export, format.ts, time.test.ts); credited day => worked=max(actual,expected), expected=override.expectedMinutes ?? schedule.
 - 2026-09-19: 1.C done: index.css tokens (bg/surface/raised/sunken/line/fg/muted/faint/accent/over/under/danger/sidebar, radius, shadow-card/pop, SF font stack; dark via html[data-theme] or system fallback), lib/theme.ts (applyTheme, useTheme, getStoredTheme), components/ui/* (Button, IconButton, Card, Input, NumberField, TimeField, Toggle, Segmented, Stat, Badge, ProgressRing, ProgressBar, Sidebar, AppShell, BarChart, Gallery temp; barrel index.ts). Added dep @phosphor-icons/react. Call applyTheme(getStoredTheme()) at startup; wrap App in <AppShell>.
 - 2026-09-19: 1.D done: full IPC contract in src/shared/ipc.ts + handlers in src/main/index.ts; App.tsx routes to stub pages in src/renderer/src/pages/{Today,History,Stats,Settings}.tsx. Next: Phase 2 pages + 3.x tray + 4.1 spike in parallel.
+- 2026-09-19: 2.1 done: pages/Today.tsx (live ring timer, Start/Pause, remaining/overtime + projected finish, balance, session list, week BarChart; refetch on focus + 30s).
+- 2026-09-19: 2.4 done: Stats page (src/renderer/src/pages/Stats.tsx + pages/stats/aggregate.ts); range picker, headline stats, day/week/month chart with delta toggle, weekday averages, empty state.
+- 2026-09-19: 2.2 done: pages/Settings.tsx (schedule editor+presets+week start, theme via useTheme+settings:set, autoTrack/SSIDs/grace, launch at login, credit kinds; auto-save w/ Saved indicator). SSID detect uses local detectSsid() shim calling window.api['wifi:current'] with manual fallback; swap when wifi IPC lands (4.3 UI done).
+- 2026-09-19: 2.3 done: pages/History.tsx (month nav, weekly groups + subtotals, expandable days, session add/edit/delete, per-day override control). Overrides UI (vacation/sick/holiday/custom/clear) exists, i.e. UI half of 5.1 done.
+- 2026-09-19: 3.1-3.3 done: src/main/tray/ (generated template clock icon, live H:MM title, Start/Pause/Open/Quit), close-to-tray + single instance + launch-at-login (settings:set wrapped), stale-session recovery via meta table (migration #2, heartbeat 30s) + src/main/recovery.ts (tested), push channel 'sessions:changed' -> window.events.onSessionsChanged(cb) returns unsubscribe.
+- 2026-09-19: 4.1/4.2 done: src/main/wifi/{ssid.ts,watcher.ts,watcher.test.ts,helper/ssid.swift}. SSID is redacted w/o Location permission -> needs compiled Swift helper + permission before wifi auto-track works. Watcher: createWifiWatcher(...) with tick/start/stop/markManual/startedByWatcher; wire in later.
