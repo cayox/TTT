@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Pause, PencilSimple, Play, Plus, Trash } from '@phosphor-icons/react'
-import { Badge, BarChart, Button, Card, IconButton, Page, ProgressBar, ProgressRing, ProjectDot, ProjectSelect, Stat, cx, projectColor } from '../components/ui'
+import { Badge, Button, IconButton, Page, ProgressRing, ProjectDot, ProjectSelect, Stat, cx, projectColor } from '../components/ui'
 import { isTyping, useTracker } from '../lib/tracker'
 import { SessionEditor } from '../components/SessionEditor'
 import { errorText, useToast } from '../lib/toast'
@@ -127,7 +127,6 @@ export function TodayPage() {
   const running = !!current
   const { workedMs, expectedMin, remaining, weekDays, list, ov, byProject } = view
   const { projects, projectById, nextProjectId, chooseProject } = tracker
-  const byProjectTotal = byProject.reduce((a, b) => a + b.minutes, 0)
   const over = remaining <= 0 && expectedMin > 0
   const noTarget = expectedMin === 0
   const secs = Math.floor(workedMs / 1000)
@@ -143,10 +142,15 @@ export function TodayPage() {
   else status = `${formatDurationLong(remaining)} to go`
 
   const detail = current
-    ? `Tracking since ${formatClock(current.startTs)}${current.source === 'wifi' ? ' (started by Wi-Fi)' : ''}.`
+    ? `Since ${formatClock(current.startTs)}${current.source === 'wifi' ? ', started by Wi-Fi' : ''}.`
     : list.length
       ? 'Paused. Start again when you are back.'
       : 'Nothing tracked yet today.'
+
+  // Time from the running session since the last fetch, so month numbers tick along with the clock.
+  const liveMin = current ? (now - data.fetchedAt) / 60000 : 0
+  const month = data.month.contractMin > 0 ? data.month : null
+  const monthName = new Date(now).toLocaleDateString('en-GB', { month: 'long' })
 
   return (
     <Page title="Today" subtitle={dayLabel} width="lg">
@@ -182,134 +186,240 @@ export function TodayPage() {
           </p>
         </div>
 
-        <div className="flex max-w-md flex-col gap-6">
+        <div className="flex max-w-md flex-col gap-7">
           <div>
-            <p className={cx('font-display text-[32px] font-semibold leading-tight tracking-tight text-balance', over && 'text-over')}>{status}</p>
+            <p className={cx('font-display text-[34px] font-semibold leading-tight tracking-tight text-balance', over && 'text-over')}>{status}</p>
             <p className="mt-2 text-sm text-muted">{detail}</p>
           </div>
-          <div className="flex flex-wrap gap-x-10 gap-y-4 border-t border-line pt-5">
+          <div className="flex flex-wrap gap-x-10 gap-y-5">
             {finish && <Stat size="sm" label="Finish around" value={finish} />}
             <Stat
               size="sm"
-              label="Overtime balance"
+              label="Balance"
               value={formatDelta(balance)}
               valueTone={balance > 0 ? 'over' : balance < 0 ? 'under' : 'neutral'}
-              hint={
-                data.settings.startingBalance
-                  ? `Includes ${formatDelta(data.settings.startingBalance)} carried over`
-                  : balance > 0 ? 'Ahead in total' : balance < 0 ? 'Behind in total' : 'Even'
-              }
+              hint={data.settings.startingBalance ? `Includes ${formatDelta(data.settings.startingBalance)} carried over` : undefined}
             />
-            <Stat size="sm" label="Sessions" value={list.length} />
+            {month && <MonthStat hours={month} liveMin={liveMin} name={monthName} />}
           </div>
-          {data.month.contractMin > 0 && (
-            <MonthBlock hours={data.month} liveMin={current ? (now - data.fetchedAt) / 60000 : 0} liveProjectId={current?.projectId ?? null} projectById={projectById} />
-          )}
-          {byProjectTotal > 0 && (
-            <div className="flex flex-col gap-2.5">
-              <div className="text-xs font-medium text-muted">By project</div>
-              <div className="flex h-2 gap-0.5 overflow-hidden rounded-full" role="img" aria-label="Today's time split by project">
-                {byProject.map((b) => (
-                  <span key={b.projectId ?? 'none'} className="h-full transition-[flex-grow] duration-500 ease-out-expo" style={{ flexGrow: b.minutes, background: projectColor(projectById(b.projectId)?.color) }} />
-                ))}
-              </div>
-              <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                {byProject.map((b) => (
-                  <li key={b.projectId ?? 'none'} className="flex items-center gap-1.5">
-                    <ProjectDot color={projectById(b.projectId)?.color} />
-                    <span className="text-muted">{projectById(b.projectId)?.name ?? 'No project'}</span>
-                    <span className="tnum font-medium">{formatDuration(b.minutes)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       </section>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <TodaySessions list={list} now={now} today={dateKey(now)} onChanged={refresh} />
-        <Card title="This week" action={<span className="text-[11px] text-faint">Line marks the target</span>}>
-          <BarChart
-            title="Worked hours this week"
-            data={weekDays.map((d) => ({ label: WEEKDAYS[weekdayIndex(d.date)], value: d.workedMin / 60, target: d.expectedMin / 60 }))}
-            format={(v) => `${Math.round(v * 10) / 10}h`}
-            height={180}
-            labelEvery={1}
-            highlight={weekDays.length - 1}
-          />
-        </Card>
-      </div>
+      <ProjectsSection
+        today={byProject}
+        month={month}
+        monthName={monthName}
+        liveMin={liveMin}
+        runningProjectId={current ? current.projectId : undefined}
+        projectById={projectById}
+      />
+
+      <TodaySessions list={list} now={now} today={dateKey(now)} onChanged={refresh} />
+
+      <WeekStrip days={weekDays} weekStart={data.settings.weekStart} />
     </Page>
   )
 }
 
-/**
- * This month's contract hours with flextime: how far along, what is left per workday, and whether
- * you are ahead of or behind the pace. liveMin adds the running session's time since the last fetch.
- */
-function MonthBlock({ hours, liveMin, liveProjectId, projectById }: { hours: MonthHours; liveMin: number; liveProjectId: number | null; projectById: (id: number | null | undefined) => Project | undefined }) {
+/** A page section: hairline, quiet heading, optional action on the right. */
+function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-4 border-t border-line pt-5">
+      <header className="flex min-h-7 items-center justify-between gap-3">
+        <h2 className="text-[13px] font-medium text-muted">{title}</h2>
+        {action}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+/** This month's contract hours: counted so far and what each remaining workday needs. */
+function MonthStat({ hours, liveMin, name }: { hours: MonthHours; liveMin: number; name: string }) {
   const counted = hours.countedMin + liveMin
   const remaining = Math.max(0, hours.contractMin - counted)
   const done = counted >= hours.contractMin
-  const perDay = hours.workdaysLeft ? remaining / hours.workdaysLeft : remaining
-  const flex = Math.round(flexNow(hours, hours.todayCountedMin + liveMin))
-  const month = new Date().toLocaleDateString('en-GB', { month: 'long' })
+  let hint: string
+  if (done) hint = counted > hours.contractMin ? `Done, ${formatDuration(counted - hours.contractMin)} extra` : 'Done'
+  else if (hours.workdaysLeft > 0) hint = `${formatDuration(remaining / hours.workdaysLeft)} per workday left`
+  else hint = `${formatDuration(remaining)} left, no workdays left`
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-xs font-medium text-muted">{month} hours</span>
-        <span className="tnum text-xs">
-          <span className="font-medium">{formatDuration(counted)}</span>
-          <span className="text-faint"> of {formatDuration(hours.contractMin)}</span>
+    <Stat
+      size="sm"
+      label={name}
+      valueTone={done ? 'over' : 'neutral'}
+      value={
+        <span className="tnum">
+          {formatDuration(counted)}
+          <span className="font-sans text-xs font-normal tracking-normal text-faint"> of {formatDuration(hours.contractMin)}</span>
         </span>
-      </div>
-      <ProgressBar value={counted / hours.contractMin} tone={done ? 'over' : 'accent'} label={`${month} hours`} />
-      <div className="tnum flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
-        {done ? (
-          <span className="text-over">Done{counted > hours.contractMin ? `, ${formatDuration(counted - hours.contractMin)} extra` : ''}</span>
-        ) : (
-          <>
-            <span>{formatDuration(remaining)} left</span>
-            {hours.workdaysLeft > 0 ? (
-              <span>
-                {formatDuration(perDay)} per workday <span className="text-faint">({hours.workdaysLeft} left)</span>
-              </span>
-            ) : (
-              <span className="text-faint">no workdays left</span>
-            )}
-          </>
-        )}
-        <span className="flex-1" />
-        <span title="Flextime this month: ahead (+) or behind (−) the share of your monthly hours due so far" className="flex items-center gap-1.5">
-          Flextime
-          <Badge tone={flex > 0 ? 'over' : flex < 0 ? 'under' : 'neutral'}>{formatDelta(flex)}</Badge>
-        </span>
-      </div>
-      {hours.projects.length > 0 && (
-        <ul className="mt-1.5 flex flex-col gap-1.5">
-          {hours.projects.map((p) => {
-            const c = p.countedMin + (p.projectId === liveProjectId ? liveMin : 0)
-            const project = projectById(p.projectId)
+      }
+      hint={hint}
+    />
+  )
+}
+
+/**
+ * One row per project: time today, and progress through its monthly hours when the contract is
+ * split by project. Replaces separate "by project" and "month per project" blocks.
+ */
+function ProjectsSection({
+  today,
+  month,
+  monthName,
+  liveMin,
+  runningProjectId,
+  projectById
+}: {
+  today: { projectId: number | null; minutes: number }[]
+  month: MonthHours | null
+  monthName: string
+  liveMin: number
+  /** undefined when nothing runs; null when the running session has no project. */
+  runningProjectId: number | null | undefined
+  projectById: (id: number | null | undefined) => Project | undefined
+}) {
+  const monthProjects = month?.projects ?? []
+  const split = monthProjects.length > 0
+  const todayBy = new Map(today.map((t) => [t.projectId, t.minutes]))
+  const ids: (number | null)[] = [...monthProjects.map((p) => p.projectId)]
+  for (const t of today) if (!ids.includes(t.projectId)) ids.push(t.projectId)
+  if (ids.length === 0 && !month) return null
+
+  const flex = month ? Math.round(flexNow(month, month.todayCountedMin + liveMin)) : null
+  const cols = split ? 'grid-cols-[minmax(0,1fr)_4rem_minmax(6rem,13rem)_7.5rem]' : 'grid-cols-[minmax(0,1fr)_4rem]'
+
+  return (
+    <Section
+      title="Projects"
+      action={
+        flex !== null && (
+          <span title="Ahead (+) or behind (−) the share of your monthly hours due so far" className="flex items-center gap-2 text-xs text-muted">
+            Flextime this month
+            <Badge tone={flex > 0 ? 'over' : flex < 0 ? 'under' : 'neutral'}>{formatDelta(flex)}</Badge>
+          </span>
+        )
+      }
+    >
+      {ids.length === 0 ? (
+        <p className="text-sm text-muted">Nothing tracked yet today.</p>
+      ) : (
+        <div role="table" aria-label="Time by project" className="flex flex-col">
+          <div role="row" className={cx('grid items-center gap-4 pb-2 text-[11px] text-faint', cols)}>
+            <span role="columnheader">Project</span>
+            <span role="columnheader" className="text-right">Today</span>
+            {split && <span role="columnheader" className="col-span-2">{monthName}</span>}
+          </div>
+          {ids.map((id) => {
+            const project = projectById(id)
+            const running = runningProjectId !== undefined && runningProjectId === id
+            const todayMin = todayBy.get(id) ?? 0
+            const mp = monthProjects.find((p) => p.projectId === id)
+            const counted = mp ? mp.countedMin + (running ? liveMin : 0) : 0
             return (
-              <li key={p.projectId} className="grid grid-cols-[minmax(0,9rem)_1fr_auto] items-center gap-3 text-xs">
-                <span className="flex min-w-0 items-center gap-1.5">
+              <div role="row" key={id ?? 'none'} className={cx('grid min-h-10 items-center gap-4 text-sm', cols)}>
+                <span role="cell" className="flex min-w-0 items-center gap-2.5">
                   <ProjectDot color={project?.color} />
-                  <span className="truncate text-muted">{project?.name ?? 'Project'}</span>
+                  <span className={cx('truncate', todayMin > 0 ? 'text-fg' : 'text-muted')}>{project?.name ?? 'No project'}</span>
+                  {running && <Badge tone="over">Running</Badge>}
                 </span>
-                <span className="h-1 overflow-hidden rounded-full bg-sunken">
-                  <span className="block h-full rounded-full transition-[width] duration-500 ease-out-expo" style={{ width: `${Math.min(100, (c / p.contractMin) * 100)}%`, background: projectColor(project?.color) }} />
+                <span role="cell" className={cx('tnum text-right', todayMin > 0 ? 'font-medium' : 'text-faint')}>
+                  {todayMin > 0 ? formatDuration(todayMin) : '–'}
                 </span>
-                <span className="tnum">
-                  <span className="font-medium">{formatDuration(c)}</span>
-                  <span className="text-faint"> of {formatDuration(p.contractMin)}</span>
-                </span>
-              </li>
+                {split &&
+                  (mp ? (
+                    <>
+                      <span role="cell" className="h-1.5 overflow-hidden rounded-full bg-sunken">
+                        <span
+                          className="block h-full rounded-full transition-[width] duration-500 ease-out-expo"
+                          style={{ width: `${Math.min(100, (counted / mp.contractMin) * 100)}%`, background: projectColor(project?.color) }}
+                        />
+                      </span>
+                      <span role="cell" className="tnum text-right text-xs">
+                        <span className="font-medium">{formatDuration(counted)}</span>
+                        <span className="text-faint"> of {formatDuration(mp.contractMin)}</span>
+                      </span>
+                    </>
+                  ) : (
+                    <span role="cell" className="col-span-2 text-xs text-faint">No monthly hours</span>
+                  ))}
+              </div>
             )
           })}
-        </ul>
+        </div>
       )}
+    </Section>
+  )
+}
+
+/** Today's sessions laid out on a strip of the day, so gaps and project switches show at a glance. */
+function DayTimeline({ list, now, today }: { list: Session[]; now: number; today: string }) {
+  const dayStart = startOfDay(today)
+  const dayEnd = startOfDay(addDays(today, 1))
+  const segs = list.map((s) => ({ s, a: Math.max(s.startTs, dayStart), b: Math.min(s.endTs ?? now, dayEnd) })).filter((x) => x.b > x.a)
+  const hourAt = (h: number): number => new Date(dayStart).setHours(h, 0, 0, 0)
+  const floorHour = (ts: number): number => new Date(ts).setMinutes(0, 0, 0)
+  const ceilHour = (ts: number): number => (floorHour(ts) === ts ? ts : floorHour(ts) + 3600000)
+  const from = Math.min(hourAt(8), ...segs.map((x) => floorHour(x.a)))
+  const to = Math.min(dayEnd, Math.max(hourAt(18), ...segs.map((x) => ceilHour(x.b))))
+  const span = to - from
+  const pct = (ts: number): string => `${((ts - from) / span) * 100}%`
+  const ticks: number[] = []
+  for (let t = from; t <= to; t += 2 * 3600000) ticks.push(t)
+  const { projectById } = useTracker()
+  const nowVisible = now > from && now < to && dateKey(now) === today
+
+  return (
+    <div className="flex flex-col gap-1.5" role="img" aria-label="Today's sessions on a timeline">
+      <div className="relative h-3 rounded-full bg-sunken">
+        {segs.map(({ s, a, b }) => (
+          <span
+            key={s.id}
+            title={`${projectById(s.projectId)?.name ?? 'No project'}, ${formatClock(a)}–${s.endTs ? formatClock(b) : 'now'}`}
+            className="absolute inset-y-0 rounded-full transition-[width] duration-500 ease-out-expo"
+            style={{ left: pct(a), width: `max(4px, ${((b - a) / span) * 100}%)`, background: projectColor(projectById(s.projectId)?.color) }}
+          />
+        ))}
+        {nowVisible && <span aria-hidden className="absolute -inset-y-1 w-px bg-line-strong" style={{ left: pct(now) }} />}
+      </div>
+      <div className="relative h-3.5 text-[10.5px] text-faint">
+        {ticks.map((t, i) => (
+          <span key={t} className={cx('tnum absolute', i === 0 ? '' : i === ticks.length - 1 && t === to ? '-translate-x-full' : '-translate-x-1/2')} style={{ left: pct(t) }}>
+            {formatClock(t)}
+          </span>
+        ))}
+      </div>
     </div>
+  )
+}
+
+/** The week so far as one quiet row of day totals; the full chart lives on Stats. */
+function WeekStrip({ days, weekStart }: { days: DayStat[]; weekStart: number }) {
+  const byWeekday = new Map(days.map((d) => [weekdayIndex(d.date), d]))
+  const order = Array.from({ length: 7 }, (_, i) => (weekStart + i) % 7)
+  const today = days[days.length - 1]?.date
+  return (
+    <Section title="This week">
+      <ul className="grid grid-cols-7 gap-2">
+        {order.map((w) => {
+          const d = byWeekday.get(w)
+          const met = !!d && d.expectedMin > 0 && d.workedMin >= d.expectedMin
+          const isToday = d?.date === today
+          return (
+            <li
+              key={w}
+              title={d && d.expectedMin > 0 ? `${formatDuration(d.workedMin)} of ${formatDuration(d.expectedMin)}` : undefined}
+              className={cx('flex flex-col gap-1 rounded-lg px-2.5 py-2', isToday && 'bg-sunken')}
+            >
+              <span className={cx('text-[11px]', isToday ? 'font-medium text-fg' : 'text-faint')}>{WEEKDAYS[w]}</span>
+              <span className={cx('tnum text-sm', !d || d.workedMin === 0 ? 'text-faint' : met ? 'text-over' : 'text-fg')}>
+                {d && d.workedMin > 0 ? formatDuration(d.workedMin) : '–'}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
+    </Section>
   )
 }
 
@@ -319,9 +429,8 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const act = useSessionActions(onChanged)
   return (
-    <Card
-      title="Today's sessions"
-      className={cx(editing !== null && 'md:col-span-2')}
+    <Section
+      title="Sessions"
       action={
         editing === null && (
           <Button size="sm" variant="ghost" icon={<Plus size={13} />} onClick={() => setEditing('new')}>
@@ -330,8 +439,9 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
         )
       }
     >
+      {list.length > 0 && <DayTimeline list={list} now={now} today={today} />}
       {editing === 'new' && (
-        <div className="mb-3">
+        <div>
           <SessionEditor
             compact
             date={today}
@@ -344,7 +454,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
       )}
       {list.length === 0 ? (
         editing !== 'new' && (
-          <div className="grid place-items-center gap-1 py-8 text-center">
+          <div className="grid place-items-center gap-1 py-6 text-center">
             <p className="text-sm font-medium">No sessions yet</p>
             <p className="text-xs text-muted">Press Start or Space to begin, or add one you forgot.</p>
           </div>
@@ -370,7 +480,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
                   type="button"
                   onClick={() => setEditing(s.id)}
                   title="Edit times"
-                  className="no-drag tnum -mx-1 w-[7rem] shrink-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-sunken"
+                  className="no-drag tnum -mx-1 w-[8rem] shrink-0 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-sunken"
                 >
                   {dateKey(s.startTs) !== today && <span className="text-faint">{formatShortDay(s.startTs)} </span>}
                   {formatClock(s.startTs)}–{s.endTs ? formatClock(s.endTs) : 'now'}
@@ -383,7 +493,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
                   value={s.projectId}
                   onChange={(id) => void act.update(s.id, { projectId: id }, true)}
                 />
-                {!s.endTs ? <Badge tone="over">Running</Badge> : s.source === 'wifi' ? <Badge>Wi-Fi</Badge> : null}
+                {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
                 <span className="tnum w-12 shrink-0 text-right text-muted">{formatDuration(((s.endTs ?? now) - s.startTs) / 60000)}</span>
                 <span className="flex opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
                   <IconButton size="sm" label="Edit session" onClick={() => setEditing(s.id)}><PencilSimple size={14} /></IconButton>
@@ -394,7 +504,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
           )}
         </ul>
       )}
-    </Card>
+    </Section>
   )
 }
 
@@ -406,14 +516,24 @@ function Skeleton() {
       <div className="h-9 w-40 rounded-md bg-sunken" />
       <div className="flex items-center gap-10">
         <div className="size-[248px] rounded-full border-[12px] border-sunken" />
-        <div className="flex flex-col gap-4">
-          <div className="h-7 w-56 rounded-md bg-sunken" />
-          <div className="h-11 w-32 rounded-lg bg-sunken" />
+        <div className="flex flex-col gap-5">
+          <div className="h-9 w-64 rounded-md bg-sunken" />
+          <div className="flex gap-10">
+            <div className="h-10 w-20 rounded-md bg-sunken" />
+            <div className="h-10 w-20 rounded-md bg-sunken" />
+            <div className="h-10 w-24 rounded-md bg-sunken" />
+          </div>
         </div>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="h-48 rounded-xl bg-sunken" />
-        <div className="h-48 rounded-xl bg-sunken" />
+      <div className="flex flex-col gap-3 border-t border-line pt-5">
+        <div className="h-4 w-20 rounded bg-sunken" />
+        <div className="h-8 rounded-md bg-sunken" />
+        <div className="h-8 rounded-md bg-sunken" />
+      </div>
+      <div className="flex flex-col gap-3 border-t border-line pt-5">
+        <div className="h-4 w-20 rounded bg-sunken" />
+        <div className="h-3 rounded-full bg-sunken" />
+        <div className="h-8 rounded-md bg-sunken" />
       </div>
     </div>
   )
