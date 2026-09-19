@@ -5,7 +5,7 @@
 <h1 align="center">TTT <sup><kbd>beta</kbd></sup></h1>
 
 <p align="center">
-  <b>The Time Tracking Tool.</b> A calm macOS menu bar app for your working hours and overtime balance.
+  <b>Time Tracking Tool.</b> A calm macOS menu bar app for your working hours and overtime balance.
 </p>
 
 <p align="center">
@@ -30,12 +30,12 @@
 
 ## Screenshots
 
-| | |
-|---|---|
+|                                                                               |                                                                                        |
+| ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | ![History: month heatmap and editable sessions](docs/screenshots/history.jpg) | ![Stats: balance, monthly hours, projects and daily hours](docs/screenshots/stats.jpg) |
-| **History.** Month heatmap, sessions grouped by week, days off. | **Stats.** Balance, monthly hours and projects over 7 days to all time. |
-| ![Onboarding: pick your work week](docs/screenshots/onboarding-schedule.jpg) | ![Settings: weekly schedule, monthly hours and balance](docs/screenshots/settings.jpg) |
-| **Setup.** A short first-run guide: work week, projects, Wi-Fi. | **Settings.** Work time, projects, automatic tracking, general. |
+| **History.** Month heatmap, sessions grouped by week, days off.               | **Stats.** Balance, monthly hours and projects over 7 days to all time.                |
+| ![Onboarding: pick your work week](docs/screenshots/onboarding-schedule.jpg)  | ![Settings: weekly schedule, monthly hours and balance](docs/screenshots/settings.jpg) |
+| **Setup.** A short first-run guide: work week, projects, Wi-Fi.               | **Settings.** Work time, projects, automatic tracking, general.                        |
 
 ## Install
 
@@ -51,12 +51,12 @@ To read the Wi-Fi name, macOS asks for Location access the first time automatic 
 
 ## Keyboard shortcuts
 
-| Shortcut | Action |
-|---|---|
-| <kbd>⌘</kbd><kbd>↩</kbd> | Start or pause, anywhere in the app |
-| <kbd>Space</kbd> | Start or pause on Today |
-| <kbd>⌘</kbd><kbd>1</kbd> to <kbd>⌘</kbd><kbd>4</kbd> | Today, History, Stats, Settings |
-| <kbd>←</kbd> <kbd>→</kbd> | Previous or next month in History |
+| Shortcut                                             | Action                              |
+| ---------------------------------------------------- | ----------------------------------- |
+| <kbd>⌘</kbd><kbd>↩</kbd>                             | Start or pause, anywhere in the app |
+| <kbd>Space</kbd>                                     | Start or pause on Today             |
+| <kbd>⌘</kbd><kbd>1</kbd> to <kbd>⌘</kbd><kbd>4</kbd> | Today, History, Stats, Settings     |
+| <kbd>←</kbd> <kbd>→</kbd>                            | Previous or next month in History   |
 
 ## Development
 
@@ -70,13 +70,13 @@ npm install
 npm run dev
 ```
 
-| Script | |
-|---|---|
-| `npm run dev` | Run the app with hot reload |
-| `npm test` | Unit tests (Vitest) |
-| `npm run typecheck` | TypeScript |
-| `npm run build` | Production bundle in `out/` |
-| `npm run dist` | Package DMG and zip for arm64 and x64 into `release/` |
+| Script              |                                                       |
+| ------------------- | ----------------------------------------------------- |
+| `npm run dev`       | Run the app with hot reload                           |
+| `npm test`          | Unit tests (Vitest)                                   |
+| `npm run typecheck` | TypeScript                                            |
+| `npm run build`     | Production bundle in `out/`                           |
+| `npm run dist`      | Package DMG and zip for arm64 and x64 into `release/` |
 
 ```
 src/
