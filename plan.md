@@ -59,7 +59,7 @@ src/
 - [x] 1.A Data layer: repositories for sessions, schedule, overrides, settings + tests
 - [x] 1.B Shared logic: overtime/undertime math, range stats (7/30/90/365/all), tests
 - [x] 1.C Design system: tokens, dark/light/system theme, primitives (Button, Card, Input, Toggle, Segmented, Stat, Chart shell). Run the design-taste skill first
-- [ ] 1.D Integrate: start/stop/pause session via IPC
+- [x] 1.D Integrate: start/stop/pause session via IPC
 
 ### Phase 2: Screens (parallelizable after Phase 1)
 - [ ] 2.1 Today: big timer, start/stop, progress vs. expected, running balance
@@ -96,3 +96,4 @@ src/
 - 2026-09-19: 1.A done: src/main/db/repos.ts createRepos(db) -> {sessions, schedule, overrides, settings} + repos.test.ts.
 - 2026-09-19: 1.B done: src/shared/time.ts (+stats.ts re-export, format.ts, time.test.ts); credited day => worked=max(actual,expected), expected=override.expectedMinutes ?? schedule.
 - 2026-09-19: 1.C done: index.css tokens (bg/surface/raised/sunken/line/fg/muted/faint/accent/over/under/danger/sidebar, radius, shadow-card/pop, SF font stack; dark via html[data-theme] or system fallback), lib/theme.ts (applyTheme, useTheme, getStoredTheme), components/ui/* (Button, IconButton, Card, Input, NumberField, TimeField, Toggle, Segmented, Stat, Badge, ProgressRing, ProgressBar, Sidebar, AppShell, BarChart, Gallery temp; barrel index.ts). Added dep @phosphor-icons/react. Call applyTheme(getStoredTheme()) at startup; wrap App in <AppShell>.
+- 2026-09-19: 1.D done: full IPC contract in src/shared/ipc.ts + handlers in src/main/index.ts; App.tsx routes to stub pages in src/renderer/src/pages/{Today,History,Stats,Settings}.tsx. Next: Phase 2 pages + 3.x tray + 4.1 spike in parallel.
