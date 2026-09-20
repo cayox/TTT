@@ -21,12 +21,27 @@ export function parseNetworksetup(out: string): string | null {
   return s && s !== '<redacted>' ? s : null
 }
 
-/** Optional CoreWLAN helper (see helper/ssid.swift); path via TTT_SSID_HELPER or resources. */
+/**
+ * Optional CoreWLAN helper (see helper/ssid.swift): TTT_SSID_HELPER, the packaged app's resources,
+ * or build/ssid-helper so `npm run dev` uses the same binary.
+ */
+export function helperPath(): string | null {
+  const candidates = [
+    process.env.TTT_SSID_HELPER,
+    join(process.resourcesPath ?? '', 'ssid-helper'),
+    join(process.cwd(), 'build', 'ssid-helper')
+  ]
+  return candidates.find((p): p is string => !!p && existsSync(p)) ?? null
+}
+
+/** Runs the helper; null when it is not bundled or it failed. */
+export async function runHelper(args: string[], timeout?: number): Promise<string | null> {
+  const p = helperPath()
+  return p ? ((await run(p, args, timeout))?.trim() ?? null) || null : null
+}
+
 async function viaHelper(): Promise<string | null> {
-  const p = process.env.TTT_SSID_HELPER ?? join(process.resourcesPath ?? '', 'ssid-helper')
-  if (!existsSync(p)) return null
-  const out = await run(p, [])
-  return out?.trim() || null
+  return runHelper([])
 }
 
 export async function getCurrentSsid(): Promise<string | null> {

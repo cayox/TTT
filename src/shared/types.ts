@@ -1,3 +1,5 @@
+import type { ChangelogGroup } from './changelog'
+
 export type SessionSource = 'manual' | 'wifi'
 
 export interface Session {
@@ -26,6 +28,41 @@ export interface CurrentNetwork {
   /** MAC address of the default router; identifies the network without the SSID. */
   routerId: string | null
   gateway: string | null
+}
+
+/** macOS Location authorization for TTT; 'unknown' when it cannot be read (no helper, or not macOS). */
+export type LocationStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'unknown'
+
+/** A release on GitHub that is newer than the running app. */
+export interface UpdateRelease {
+  /** Without a leading `v`. */
+  version: string
+  /** Release notes, parsed into changelog groups. */
+  groups: ChangelogGroup[]
+  publishedAt: string | null
+  /** Release page on GitHub. */
+  url: string
+  prerelease: boolean
+  /** The downloadable build for this Mac; null when the release has none. */
+  asset: { name: string; url: string; size: number; sha256: string | null } | null
+}
+
+export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
+
+export interface UpdateState {
+  phase: UpdatePhase
+  currentVersion: string
+  /** Releases newer than the running version, newest first; empty when up to date. */
+  releases: UpdateRelease[]
+  /** 0..1 while downloading. */
+  progress: number
+  error: string | null
+  /** When the last check finished, epoch ms. */
+  lastCheck: number | null
+  /** Version the user chose to skip; '' = none. The dialog stays closed for it, Settings still shows it. */
+  skipped: string
+  /** False when TTT cannot replace itself (unpackaged, or installed somewhere read-only). */
+  canInstall: boolean
 }
 
 export type DayKind = 'holiday' | 'vacation' | 'sick' | 'custom'
@@ -65,6 +102,10 @@ export interface Settings {
   projectMonthlyMin: Record<string, number>
   /** First-run welcome flow finished or skipped. */
   onboarded: boolean
+  /** Look for new releases on GitHub in the background. */
+  autoCheckUpdates: boolean
+  /** Version the user chose to skip; '' = none. */
+  skippedUpdate: string
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -83,7 +124,9 @@ export const DEFAULT_SETTINGS: Settings = {
   monthlyHoursMin: 0,
   monthlyHoursByProject: false,
   projectMonthlyMin: {},
-  onboarded: false
+  onboarded: false,
+  autoCheckUpdates: true,
+  skippedUpdate: ''
 }
 
 export const DEFAULT_SCHEDULE: Schedule = [480, 480, 480, 480, 480, 0, 0]

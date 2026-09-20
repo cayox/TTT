@@ -19,6 +19,9 @@ asarUnpack:
 extraResources:
   - from: build/ssid-helper
     to: ssid-helper
+  # Read by Settings -> What's new; the updater shows GitHub's release notes instead.
+  - from: CHANGELOG.md
+    to: CHANGELOG.md
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns

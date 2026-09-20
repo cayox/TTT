@@ -6,7 +6,7 @@ import { WeekEditor } from './WeekEditor'
 import { SETTINGS_CHANGED, isTyping, useTracker } from '../lib/tracker'
 import { errorText, useToast } from '../lib/toast'
 import { PROJECT_COLORS } from '../../../shared/types'
-import type { CurrentNetwork, ProjectColor, Schedule, Settings } from '../../../shared/types'
+import type { CurrentNetwork, LocationStatus, ProjectColor, Schedule, Settings } from '../../../shared/types'
 import { formatDurationLong } from '../../../shared/format'
 
 /** Window event that reopens the welcome flow (Settings > General). */
@@ -102,20 +102,34 @@ function ProjectsStep({ drafts, setDrafts }: { drafts: DraftProject[]; setDrafts
 function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<Settings>) => void }) {
   const [net, setNet] = useState<CurrentNetwork | null | 'loading'>('loading')
   const [name, setName] = useState('')
-  useEffect(() => {
-    let live = true
+  // macOS hides Wi-Fi names from apps without Location access.
+  const [loc, setLoc] = useState<LocationStatus | null>(null)
+  const [asking, setAsking] = useState(false)
+  const load = useCallback((live = { current: true }) => {
     window.api['wifi:current']().then(
       (n) => {
-        if (!live) return
+        if (!live.current) return
         setNet(n)
         if (n.ssid) setName(n.ssid)
       },
-      () => live && setNet(null)
+      () => live.current && setNet(null)
     )
-    return () => {
-      live = false
-    }
   }, [])
+  useEffect(() => {
+    const live = { current: true }
+    load(live)
+    window.api['wifi:locationStatus']().then((s) => live.current && setLoc(s), () => undefined)
+    return () => {
+      live.current = false
+    }
+  }, [load])
+  const askLocation = async (): Promise<void> => {
+    setAsking(true)
+    const s = await window.api['wifi:requestLocation']().catch(() => null)
+    setAsking(false)
+    if (s) setLoc(s)
+    load()
+  }
   const connected = net !== 'loading' && !!net && (!!net.ssid || !!net.routerId)
   const add = (): void => {
     const n = name.trim()
@@ -134,7 +148,16 @@ function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<
       </StepHeader>
       <div className="flex flex-col divide-y divide-line rounded-xl border border-line bg-raised shadow-card">
         <div className="p-4">
-          <Toggle checked={settings.autoTrack} onChange={(v) => patch({ autoTrack: v })} label="Track automatically" description="Only on the networks you add below." />
+          <Toggle
+            checked={settings.autoTrack}
+            onChange={(v) => {
+              patch({ autoTrack: v })
+              // Switching the feature on is the moment the Location prompt makes sense.
+              if (v && loc === 'notDetermined') void askLocation()
+            }}
+            label="Track automatically"
+            description="Only on the networks you add below."
+          />
         </div>
         <div className={cx('p-4 transition-opacity duration-200', !settings.autoTrack && 'pointer-events-none opacity-45')} aria-disabled={!settings.autoTrack}>
           <div className="mb-3 flex items-center gap-2.5 text-[13px]">
@@ -145,6 +168,13 @@ function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<
               net!.ssid ? (
                 <span>
                   You are on <span className="font-medium">{net!.ssid}</span>
+                </span>
+              ) : loc === 'notDetermined' ? (
+                <span className="flex flex-wrap items-center gap-2 text-muted">
+                  macOS hides the network name from apps without Location access.
+                  <Button type="button" size="sm" variant="secondary" onClick={() => void askLocation()} disabled={asking}>
+                    {asking ? 'Waiting…' : 'Allow location access'}
+                  </Button>
                 </span>
               ) : (
                 <span className="text-muted">You are connected, but macOS hides the network name. Give it a name and TTT will recognize it by its router.</span>

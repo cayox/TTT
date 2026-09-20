@@ -214,6 +214,14 @@ textarea {
     opacity: 0.55;
   }
 }
+@keyframes ttt-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 @keyframes ttt-rise {
   from {
     opacity: 0;

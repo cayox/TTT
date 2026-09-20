@@ -2,16 +2,21 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Archive, ArrowCounterClockwise, Clock, FolderSimple, Plus, SlidersHorizontal, Star, Trash, WifiHigh, X } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
-import { Badge, Button, Card, ColorPicker, DurationField, IconButton, Input, NumberField, Page, ProjectDot, ProjectLabel, ProjectSelect, Segmented, Toggle, cx } from '../components/ui'
+import { Badge, Button, Card, ColorPicker, DurationField, IconButton, Input, Modal, NumberField, Page, ProjectDot, ProjectLabel, ProjectSelect, Segmented, Toggle, cx } from '../components/ui'
 import { WeekEditor } from '../components/WeekEditor'
 import { SETTINGS_CHANGED, resolveDefault, useTracker } from '../lib/tracker'
 import { errorText, useToast } from '../lib/toast'
 import { useTheme } from '../lib/theme'
 import { OPEN_ONBOARDING } from '../components/Onboarding'
+import { OPEN_UPDATE } from '../components/UpdateDialog'
+import { ChangelogEntryView } from '../components/Changelog'
+import { useUpdates } from '../lib/updates'
+import { compareVersions } from '../../../shared/version'
+import type { ChangelogEntry } from '../../../shared/changelog'
 import type { Theme } from '../lib/theme'
 import { DEFAULT_SCHEDULE, DEFAULT_SETTINGS } from '../../../shared/types'
 import { PROJECT_COLORS } from '../../../shared/types'
-import type { CurrentNetwork, DayKind, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
+import type { CurrentNetwork, DayKind, LocationStatus, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
 import { formatDurationLong } from '../../../shared/format'
 
 const CREDIT: { kind: DayKind; label: string }[] = [
@@ -26,6 +31,11 @@ async function detectNetwork(): Promise<CurrentNetwork | null> {
   } catch {
     return null
   }
+}
+
+/** Access is missing while the answer is still open or was a no; 'unknown' means we cannot tell, so we stay quiet. */
+function needsLocation(s: LocationStatus | null): boolean {
+  return s === 'notDetermined' || s === 'denied' || s === 'restricted'
 }
 
 const norm = (x: string): string => x.trim().toLowerCase()
@@ -60,6 +70,32 @@ function Row({ title, description, children }: { title: string; description?: st
       </div>
       <div className="min-w-0">{children}</div>
     </div>
+  )
+}
+
+/** The bundled changelog, so you can read what changed without leaving the app. */
+function WhatsNew({ open, onClose, version }: { open: boolean; onClose: () => void; version: string }) {
+  const [entries, setEntries] = useState<ChangelogEntry[] | null>(null)
+  useEffect(() => {
+    if (!open || entries) return
+    window.api['app:changelog']().then(setEntries, () => setEntries([]))
+  }, [open, entries])
+  return (
+    <Modal open={open} title="What's new" description="Every release, newest first." onClose={onClose} className="max-w-xl">
+      <div className="flex flex-col gap-5 pb-4 pt-1">
+        {entries === null ? (
+          <p className="text-[13px] text-muted">Loading…</p>
+        ) : entries.length === 0 ? (
+          <p className="text-[13px] text-muted">No changelog shipped with this build.</p>
+        ) : (
+          entries.map((e, i) => (
+            <div key={e.version} className={cx(i > 0 && 'border-t border-line pt-4')}>
+              <ChangelogEntryView entry={e} current={compareVersions(e.version, version) === 0} />
+            </div>
+          ))
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -231,6 +267,8 @@ export function SettingsPage() {
   const { theme, setTheme } = useTheme()
   const { projects } = useTracker()
   const [version, setVersion] = useState('')
+  const [whatsNew, setWhatsNew] = useState(false)
+  const updates = useUpdates()
   useEffect(() => {
     window.api['app:version']().then(setVersion, () => {})
   }, [])
@@ -305,10 +343,16 @@ export function SettingsPage() {
   /** Set when the SSID is hidden: the next name typed is linked to this router. */
   const [naming, setNaming] = useState<CurrentNetwork | null>(null)
   const draftRef = useRef<HTMLInputElement>(null)
+  // macOS hides Wi-Fi names from apps without Location access, so auto-tracking depends on it.
+  const [loc, setLoc] = useState<LocationStatus | null>(null)
+  const [asking, setAsking] = useState(false)
 
   useEffect(() => {
     let live = true
-    const poll = (): void => void detectNetwork().then((n) => live && setNet(n))
+    const poll = (): void => {
+      void detectNetwork().then((n) => live && setNet(n))
+      void window.api['wifi:locationStatus']().then((s) => live && setLoc(s)).catch(() => undefined)
+    }
     poll()
     const iv = setInterval(poll, 15000)
     return () => {
@@ -339,7 +383,29 @@ export function SettingsPage() {
     patch({ workSsids: settings.workSsids.filter((x) => x !== name), ssidProjects, networkRouters })
     toast.success(`${name} removed`, { id: 'wifi', actions: [{ label: 'Undo', onClick: () => patch(before) }] })
   }
+  /** Shows the macOS prompt when the user has not answered it yet; opens System Settings once they said no. */
+  const askLocation = async (): Promise<LocationStatus | null> => {
+    if (loc === 'denied' || loc === 'restricted') {
+      void window.api['wifi:openLocationSettings']()
+      toast.info('Allow Location for TTT', {
+        id: 'wifi-location',
+        description: 'In System Settings → Privacy & Security → Location Services, switch TTT on. macOS hides Wi-Fi names from apps without it.'
+      })
+      return loc
+    }
+    setAsking(true)
+    const s = await window.api['wifi:requestLocation']().catch(() => null)
+    setAsking(false)
+    if (s) setLoc(s)
+    void detectNetwork().then(setNet)
+    if (s === 'granted') toast.success('Location access granted', { id: 'wifi-location', description: 'TTT can read Wi-Fi names now.' })
+    else if (s === 'denied' || s === 'restricted')
+      toast.warning('Location access denied', { id: 'wifi-location', description: 'TTT can still recognize a network by its router instead.' })
+    return s
+  }
+
   const useCurrent = async (): Promise<void> => {
+    if (loc === 'notDetermined') await askLocation()
     setDetecting(true)
     const n = await detectNetwork()
     setDetecting(false)
@@ -358,6 +424,11 @@ export function SettingsPage() {
       }
     } else toast.warning('No network found', { id: 'wifi', description: 'Check that you are connected, or type the network name.' })
   }
+
+  const updateState = updates.state
+  const available = updateState && updateState.releases.length ? updateState.releases[0] : null
+  const checking = updateState?.phase === 'checking'
+  const lastCheck = updateState?.lastCheck ? new Date(updateState.lastCheck).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : null
 
   const toggleCredit = (k: DayKind, on: boolean) =>
     patch({ creditKinds: on ? [...new Set([...settings.creditKinds, k])] : settings.creditKinds.filter((x) => x !== k) })
@@ -482,8 +553,31 @@ export function SettingsPage() {
   const auto = (
     <Section title="Automatic tracking" description="Start and stop the timer with the Wi-Fi network you are on. You can always start and pause by hand.">
       <div className="px-4 py-3.5">
-        <Toggle checked={settings.autoTrack} onChange={(v) => patch({ autoTrack: v })} label="Track automatically" description="Runs while connected to a work network." />
+        <Toggle
+          checked={settings.autoTrack}
+          onChange={(v) => {
+            patch({ autoTrack: v })
+            // Asking here, when the feature is switched on, is the moment the permission makes sense.
+            if (v && loc === 'notDetermined') void askLocation()
+          }}
+          label="Track automatically"
+          description="Runs while connected to a work network."
+        />
       </div>
+      {needsLocation(loc) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3.5">
+          <div className="min-w-0 flex-1">
+            <div className="text-[13px] font-medium">Location access {loc === 'notDetermined' ? 'needed' : 'is off'}</div>
+            <p className="mt-0.5 text-xs text-muted">
+              macOS only reveals Wi-Fi names to apps with Location access. Without it TTT recognizes a network by its router instead, which
+              works but cannot show the name.
+            </p>
+          </div>
+          <Button type="button" variant="secondary" size="sm" onClick={() => void askLocation()} disabled={asking}>
+            {asking ? 'Waiting…' : loc === 'notDetermined' ? 'Allow location access' : 'Open System Settings'}
+          </Button>
+        </div>
+      )}
       <div className="px-4 py-3.5">
         <div className="mb-2 text-[13px] font-medium">Work networks</div>
         {settings.workSsids.length === 0 ? (
@@ -608,6 +702,45 @@ export function SettingsPage() {
             <Badge tone="accent">Beta</Badge>
           </span>
         </Row>
+        <Row
+          title="Updates"
+          description={
+            updateState?.phase === 'ready'
+              ? 'An update is downloaded and ready to install.'
+              : available
+                ? `TTT ${available.version} is available.`
+                : updateState?.error && updateState.phase === 'error'
+                  ? updateState.error
+                  : lastCheck
+                    ? `No newer release. Checked ${lastCheck}.`
+                    : 'TTT installs updates from its GitHub releases.'
+          }
+        >
+          <span className="flex items-center gap-2">
+            {available ? (
+              <Button variant="primary" size="sm" onClick={() => window.dispatchEvent(new Event(OPEN_UPDATE))}>
+                {updateState?.phase === 'ready' ? 'Install' : 'See what changed'}
+              </Button>
+            ) : (
+              <Button variant="secondary" size="sm" disabled={checking} onClick={() => void updates.check()}>
+                {checking ? 'Checking…' : 'Check now'}
+              </Button>
+            )}
+          </span>
+        </Row>
+        <div className="px-4 py-3.5">
+          <Toggle
+            checked={settings.autoCheckUpdates}
+            onChange={(v) => patch({ autoCheckUpdates: v })}
+            label="Check for updates automatically"
+            description="Looks at GitHub a few times a day. Nothing installs without you."
+          />
+        </div>
+        <Row title="What's new" description="The changelog for this version and the ones before it.">
+          <Button variant="secondary" size="sm" onClick={() => setWhatsNew(true)}>
+            Read changelog
+          </Button>
+        </Row>
         <Row title="Welcome tour" description="Walk through schedule, projects and automatic tracking again.">
           <Button variant="secondary" size="sm" onClick={() => window.dispatchEvent(new Event(OPEN_ONBOARDING))}>
             Show again
@@ -655,6 +788,7 @@ export function SettingsPage() {
           {pane === 'general' && general}
         </div>
       </div>
+      <WhatsNew open={whatsNew} onClose={() => setWhatsNew(false)} version={version} />
     </Page>
   )
 }

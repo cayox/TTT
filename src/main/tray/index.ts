@@ -59,7 +59,7 @@ export function createTray(d: TrayDeps): { refresh: () => void } {
     if (running && !timer) timer = setInterval(refresh, 1000)
     if (!running && timer) (clearInterval(timer), (timer = null))
   }
-  tray.on('click', d.open)
+  // No click handler: a left click opens the menu, which is the only thing the icon should do.
   refresh()
   return { refresh }
 }

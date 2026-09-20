@@ -49,13 +49,19 @@ jobs:
             release/*.zip
           if-no-files-found: error
 
+      # The app shows these notes before it updates, so a release without them is a bug.
+      - name: Release notes from the changelog
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node build/release-notes.mjs "${GITHUB_REF_NAME#v}" > release-notes.md
+
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
           # v1.0.0-beta.1 and similar are pre-releases.
           prerelease: ${{ contains(github.ref_name, '-') }}
+          # The zips are what the in-app updater downloads; the dmg is for a fresh install.
           files: |
             release/*.dmg
             release/*.zip

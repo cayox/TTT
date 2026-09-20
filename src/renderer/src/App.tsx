@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { AppShell, type NavId } from './components/ui'
 import { OPEN_ONBOARDING, Onboarding } from './components/Onboarding'
+import { UpdateDialog } from './components/UpdateDialog'
 import { TrackerProvider, useTracker } from './lib/tracker'
 import { ToastProvider } from './lib/toast'
 import { TodayPage } from './pages/Today'
@@ -39,9 +40,12 @@ function Root() {
     )
   const Page = PAGES[active]
   return (
-    <AppShell active={active} onNavigate={setActive}>
-      <Page key={active} />
-    </AppShell>
+    <>
+      <AppShell active={active} onNavigate={setActive}>
+        <Page key={active} />
+      </AppShell>
+      <UpdateDialog />
+    </>
   )
 }
 

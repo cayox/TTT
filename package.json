@@ -13,6 +13,7 @@
     "test": "vitest run",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "helper": "sh build/make-helper.sh",
+    "release-notes": "node build/release-notes.mjs",
     "dist": "npm run build && npm run helper && electron-builder --mac --publish never"
   },
   "dependencies": {

@@ -1,7 +1,8 @@
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell } from 'electron'
+import { readFileSync } from 'node:fs'
 import { createTray } from './tray'
 import { staleSessionEnd } from './recovery'
-import { EVENT_PROJECTS_CHANGED, EVENT_SESSIONS_CHANGED } from '@shared/ipc'
+import { EVENT_PROJECTS_CHANGED, EVENT_SESSIONS_CHANGED, EVENT_UPDATE_CHANGED } from '@shared/ipc'
 import { join } from 'node:path'
 import { openDb, type DB } from './db'
 import { registerIpc } from './ipc'
@@ -9,8 +10,14 @@ import { createRepos } from './db/repos'
 import { rangeStats, totalBalance, dateKey, startOfDay, projectTotals, addDays, expectedMinutesForDay } from '@shared/time'
 import { createWifiWatcher } from './wifi/watcher'
 import { getCurrentNetwork } from './wifi/ssid'
+import { locationStatus, openLocationSettings, requestLocation } from './wifi/location'
 import { createExporter } from './export'
 import { monthHours, monthTotals } from '@shared/hours'
+import { parseChangelog } from '@shared/changelog'
+import { createUpdater } from './update'
+import { REPO } from './update/releases'
+import type { UpdateState } from '@shared/types'
+import type { ChangelogEntry } from '@shared/changelog'
 
 let db: DB
 let mainWin: BrowserWindow | null = null
@@ -154,9 +161,37 @@ app.whenReady().then(() => {
 
   const exporter = createExporter(r, statsInput)
 
+  // Bundled as an extra resource; in dev it is read straight from the repo.
+  let changelog: ChangelogEntry[] | null = null
+  const readChangelog = (): ChangelogEntry[] => {
+    if (changelog) return changelog
+    const paths = [join(process.resourcesPath ?? '', 'CHANGELOG.md'), join(app.getAppPath(), '../../CHANGELOG.md'), join(process.cwd(), 'CHANGELOG.md')]
+    for (const p of paths) {
+      try {
+        return (changelog = parseChangelog(readFileSync(p, 'utf8')))
+      } catch {
+        /* try the next one */
+      }
+    }
+    return (changelog = [])
+  }
+
+  const updater = createUpdater({
+    currentVersion: app.getVersion(),
+    tempDir: app.getPath('temp'),
+    getSettings: () => r.settings.get(),
+    setSettings: (patch) => void r.settings.set(patch),
+    onChange: (state: UpdateState) => {
+      for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send(EVENT_UPDATE_CHANGED, state)
+    },
+    quit: () => app.quit()
+  })
+  app.on('before-quit', () => updater.stop())
+
   registerIpc({
     'app:ping': () => 'pong',
     'app:version': () => app.getVersion(),
+    'app:changelog': () => readChangelog(),
     'sessions:current': () => r.sessions.current(),
     'sessions:start': notify((projectId) => startManual(projectId)),
     'sessions:stop': notify(() => r.sessions.stop()),
@@ -178,12 +213,25 @@ app.whenReady().then(() => {
     }),
     'projects:usage': () => r.projects.usage(),
     'wifi:current': () => getCurrentNetwork(),
+    'wifi:locationStatus': () => locationStatus(),
+    'wifi:requestLocation': () => requestLocation(mainWin),
+    'wifi:openLocationSettings': () => openLocationSettings(),
     'export:pdf': (y, m) => exporter.pdf(mainWin, y, m),
     'export:copyText': (y, m) => exporter.copyText(y, m),
     'export:openWhatsapp': (y, m) => exporter.openWhatsapp(y, m),
     'export:openLast': () => exporter.openLast(),
     'export:revealLast': () => exporter.revealLast(),
     'export:shareLast': () => exporter.shareLast(mainWin),
+    'update:state': () => updater.state(),
+    'update:check': () => updater.check(true),
+    'update:download': () => updater.download(),
+    'update:install': () => updater.install(),
+    'update:skip': (version) => updater.skip(version),
+    'update:dismiss': () => updater.dismiss(),
+    'update:openRelease': (version) => {
+      const v = version ?? updater.state().releases[0]?.version
+      void shell.openExternal(v ? `https://github.com/${REPO}/releases/tag/v${v}` : `https://github.com/${REPO}/releases`)
+    },
     'settings:get': () => r.settings.get(),
     'settings:set': (p) => {
       const res = r.settings.set(p)
@@ -223,6 +271,7 @@ app.whenReady().then(() => {
     }
   })
   watcher.start()
+  updater.start()
   createWindow()
   app.on('activate', showWindow)
 })
