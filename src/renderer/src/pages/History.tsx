@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CaretDown, CaretLeft, CaretRight, PencilSimple, Plus, Trash } from '@phosphor-icons/react'
-import { Badge, Button, Card, IconButton, NumberField, Page, ProjectLabel, Segmented, cx } from '../components/ui'
+import { CaretDown, CaretLeft, CaretRight, MagnifyingGlass, PencilSimple, Plus, Trash, X } from '@phosphor-icons/react'
+import { Badge, Button, Card, IconButton, Input, NumberField, Page, ProjectLabel, ProjectSelect, Segmented, cx } from '../components/ui'
 import { SessionEditor } from '../components/SessionEditor'
 import { ExportMenu } from '../components/ExportMenu'
 import { errorText, useToast } from '../lib/toast'
 import { useSessionActions } from '../lib/sessions'
 import { isTyping, useTracker } from '../lib/tracker'
 import type { Tone } from '../components/ui'
-import { addDays, dateKey, dayBalance, startOfDay, weekdayIndex, workedMinutesByDay } from '../../../shared/time'
+import { addDays, dateKey, dayBalance, startOfDay, weekdayIndex, workByDay, workedMinutesByDay } from '../../../shared/time'
+import { overlappingIds } from '../../../shared/intervals'
+import { checkBreaks } from '../../../shared/breaks'
+import { breakIssueText } from '../../../shared/report'
+import { takePendingDay } from '../lib/nav'
 import type { DayStat } from '../../../shared/time'
 import { formatClock, formatDelta, formatDuration } from '../../../shared/format'
 import { DEFAULT_SCHEDULE, DEFAULT_SETTINGS } from '../../../shared/types'
@@ -53,7 +57,7 @@ function OverrideControl({ date, override, schedule, onSet, onClear }: {
   )
 }
 
-function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }: {
+function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch, overlaps, breakIssue }: {
   stat: DayStat
   sessions: Session[]
   override?: DayOverride
@@ -61,7 +65,12 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
   open: boolean
   onToggle: () => void
   refetch: () => Promise<void>
+  /** Ids of sessions that overlap another one. */
+  overlaps: Set<number>
+  /** Break-rule problem on this day, or null. */
+  breakIssue: string | null
 }) {
+  const hasOverlap = sessions.some((s) => overlaps.has(s.id))
   const { projectById } = useTracker()
   const [editing, setEditing] = useState<number | 'new' | null>(null)
   const act = useSessionActions(refetch)
@@ -98,6 +107,8 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
         <span className="tnum flex-1 text-[13px] text-muted">
           {formatDuration(stat.workedMin)} <span className="text-faint">of {formatDuration(stat.expectedMin)}</span>
         </span>
+        {hasOverlap && <Badge tone="under">Overlap</Badge>}
+        {breakIssue && <span title={`German break rules (ArbZG): ${breakIssue}`}><Badge tone="under">{breakIssue}</Badge></span>}
         {override && <Badge tone="accent">{KIND_LABEL[override.kind]}{override.kind === 'custom' ? ` ${formatDuration(override.expectedMinutes ?? 0)}` : ''}</Badge>}
         {!quiet && !stat.credited && <Badge tone={deltaTone(stat.deltaMin)}>{formatDelta(stat.deltaMin)}</Badge>}
       </button>
@@ -110,13 +121,14 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
             editing === s.id ? (
               <SessionEditor key={s.id} date={stat.date} initial={s}
                 onCancel={() => setEditing(null)}
-                onSave={async (d) => { if (await act.update(s.id, d)) setEditing(null) }} />
+                onSave={async (d) => { if (await act.update(s.id, d, false, s)) setEditing(null) }} />
             ) : (
               <div key={s.id} className="flex items-center gap-3 text-[13px]">
                 <span className="tnum w-28 shrink-0">{formatClock(s.startTs)}–{s.endTs ? formatClock(s.endTs) : 'running'}</span>
                 <span className="tnum w-14 shrink-0 text-muted">{s.endTs ? formatDuration((s.endTs - s.startTs) / 60000) : ''}</span>
                 <ProjectLabel project={projectById(s.projectId)} className="w-36 shrink-0" />
                 {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
+                {overlaps.has(s.id) && <span title="This session overlaps another one. The time is only counted once; edit or delete one of them."><Badge tone="under">Overlaps</Badge></span>}
                 <span className="min-w-0 flex-1 truncate text-muted">{s.note}</span>
                 <span className="flex">
                   <IconButton size="sm" label="Edit session" onClick={() => setEditing(s.id)}><PencilSimple size={14} /></IconButton>
@@ -144,13 +156,25 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch }:
 
 export function HistoryPage() {
   const now = new Date()
-  const [ym, setYm] = useState({ y: now.getFullYear(), m: now.getMonth() })
+  // Opened from somewhere else at a given day (e.g. Today's "no entries" notice).
+  const [pending] = useState(() => {
+    const d = takePendingDay()
+    if (d) {
+      const [y, m] = d.split('-').map(Number)
+      return { date: d, y, m: m - 1 }
+    }
+    return null
+  })
+  const [ym, setYm] = useState(() => (pending ? { y: pending.y, m: pending.m } : { y: now.getFullYear(), m: now.getMonth() }))
   const [sessions, setSessions] = useState<Session[]>([])
   const [overrides, setOverrides] = useState<DayOverride[]>([])
   const [schedule, setSchedule] = useState<Schedule>(DEFAULT_SCHEDULE)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [loaded, setLoaded] = useState(false)
   const [openDate, setOpenDate] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [projectFilter, setProjectFilter] = useState<number | null>(null)
+  const { projects } = useTracker()
 
   const first = `${ym.y}-${pad(ym.m + 1)}-01`
   const nextFirst = dateKey(new Date(ym.y, ym.m + 1, 1).getTime())
@@ -174,10 +198,17 @@ export function HistoryPage() {
   const refetchRef = useRef(refetch)
   refetchRef.current = refetch
   useEffect(() => { void refetch() }, [refetch])
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!pending || opened.current || !loaded || ym.y !== pending.y || ym.m !== pending.m) return
+    opened.current = true
+    openDay(pending.date)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, loaded, ym])
 
   const today = dateKey(Date.now())
   const { weeks, monthWorked, monthExpected } = useMemo(() => {
-    const worked = workedMinutesByDay(sessions, Date.now())
+    const worked = workedMinutesByDay(sessions, Date.now(), settings)
     const ov = new Map(overrides.map((o) => [o.date, o]))
     const days: DayStat[] = []
     for (let d = first; d <= last && d <= today; d = addDays(d, 1)) days.push(dayBalance(d, worked[d] ?? 0, schedule, ov.get(d), settings))
@@ -207,6 +238,27 @@ export function HistoryPage() {
   }, [])
   const ovMap = new Map(overrides.map((o) => [o.date, o]))
   const monthDelta = monthWorked - monthExpected
+  const overlaps = useMemo(() => overlappingIds(sessions, Date.now()), [sessions])
+  const breakIssues = useMemo(() => {
+    const out = new Map<string, string>()
+    if (!settings.breakRules) return out
+    for (const [date, work] of Object.entries(workByDay(sessions, Date.now()))) {
+      const issue = breakIssueText(checkBreaks(work))
+      if (issue && date < today) out.set(date, issue)
+    }
+    return out
+  }, [sessions, settings.breakRules, today])
+
+  // Search notes and filter by project: only matching sessions and their days are shown, expanded.
+  const q = query.trim().toLowerCase()
+  const filtering = q !== '' || projectFilter !== null
+  const matches = (s: Session): boolean =>
+    (projectFilter === null || s.projectId === projectFilter) &&
+    (q === '' || s.note.toLowerCase().includes(q) || (projects.find((p) => p.id === s.projectId)?.name.toLowerCase().includes(q) ?? false))
+  const daySessions = (date: string): Session[] =>
+    sessions.filter((x) => dateKey(x.startTs) === date && (!filtering || matches(x))).sort((a, b) => a.startTs - b.startTs)
+  const shownWeeks = filtering ? weeks.map((w) => ({ ...w, days: w.days.filter((d) => daySessions(d.date).length > 0) })).filter((w) => w.days.length > 0) : weeks
+  const matchCount = filtering ? sessions.filter((x) => x.startTs >= startOfDay(first) && matches(x)).length : 0
 
   const isCurrentRef = useRef(isCurrent)
   isCurrentRef.current = isCurrent
@@ -255,9 +307,23 @@ export function HistoryPage() {
         <Card><p className="py-10 text-center text-[13px] text-muted">Nothing to show for this month yet.</p></Card>
       ) : (
         <>
+          <div className="flex flex-wrap items-center gap-2" role="search">
+            <div className="relative w-64">
+              <MagnifyingGlass size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" aria-hidden />
+              <Input aria-label="Search notes and projects this month" placeholder="Search notes" value={query} onChange={(e) => setQuery(e.target.value)} className="pl-5" />
+            </div>
+            <ProjectSelect className="w-48" ariaLabel="Filter by project" projects={projects} noneLabel="All projects" value={projectFilter} onChange={setProjectFilter} />
+            {filtering && (
+              <>
+                <span className="text-xs text-muted" aria-live="polite">{matchCount} {matchCount === 1 ? 'session' : 'sessions'}</span>
+                <Button size="sm" variant="ghost" icon={<X size={12} />} onClick={() => (setQuery(''), setProjectFilter(null))}>Clear</Button>
+              </>
+            )}
+          </div>
           <MonthGrid y={ym.y} m={ym.m} days={weeks.flatMap((w) => w.days)} today={today} weekStart={settings.weekStart} overrides={ovMap} selected={openDate} onSelect={openDay} />
           <Card padded={false} className="overflow-clip">
-            {weeks.map((w) => (
+            {filtering && shownWeeks.length === 0 && <p className="py-10 text-center text-[13px] text-muted">No sessions this month match.</p>}
+            {shownWeeks.map((w) => (
               <section key={w.weekStart} aria-label={`Week of ${fmtDay(w.weekStart)}`}>
                 <header className="sticky top-0 flex items-center justify-between border-b border-t border-line bg-raised-solid/95 px-4 py-2 backdrop-blur first:border-t-0" style={{ zIndex: 1 }}>
                   <h2 className="text-xs font-medium text-muted">Week of {fmtDay(w.weekStart)}</h2>
@@ -268,8 +334,8 @@ export function HistoryPage() {
                 </header>
                 {w.days.map((s) => (
                   <DayRow key={s.date} stat={s} override={ovMap.get(s.date)} schedule={schedule}
-                    sessions={sessions.filter((x) => dateKey(x.startTs) === s.date).sort((a, b) => a.startTs - b.startTs)}
-                    open={openDate === s.date} onToggle={() => setOpenDate(openDate === s.date ? null : s.date)} refetch={refetch} />
+                    sessions={daySessions(s.date)} overlaps={overlaps} breakIssue={breakIssues.get(s.date) ?? null}
+                    open={filtering || openDate === s.date} onToggle={() => setOpenDate(openDate === s.date ? null : s.date)} refetch={refetch} />
                 ))}
               </section>
             ))}

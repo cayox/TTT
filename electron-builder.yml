@@ -22,6 +22,10 @@ extraResources:
   # Read by Settings -> What's new; the updater shows GitHub's release notes instead.
   - from: CHANGELOG.md
     to: CHANGELOG.md
+# ttt:// links (Shortcuts, Focus modes, launchers): see README.
+protocols:
+  - name: TTT
+    schemes: [ttt]
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns

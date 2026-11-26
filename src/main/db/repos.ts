@@ -1,7 +1,6 @@
 import type { DB } from './index'
 import {
   DEFAULT_SCHEDULE,
-  DEFAULT_SETTINGS,
   PROJECT_COLORS,
   type DayOverride,
   type Project,
@@ -11,6 +10,8 @@ import {
   type SessionSource,
   type Settings
 } from '@shared/types'
+import { SessionError, sessionProblem } from '@shared/validate'
+import { cleanPatch, readSettings } from '@shared/settings'
 
 interface SessionRow {
   id: number
@@ -49,6 +50,19 @@ export function createRepos(db: DB) {
     return r ? toSession(r) : null
   }
 
+  /** Throws a SessionError when the times would overlap another session, run backwards or lie in the future. */
+  const assertValid = (s: { startTs: number; endTs: number | null }, exceptId?: number): void => {
+    const now = Date.now()
+    const others = Number.isFinite(s.startTs)
+      ? sessions.list(s.startTs - 1, (s.endTs ?? now) + 1).filter((o) => o.id !== exceptId)
+      : []
+    // A running session elsewhere matters even when it lies outside this window.
+    const open = sessions.current()
+    if (open && open.id !== exceptId && !others.some((o) => o.id === open.id)) others.push(open)
+    const problem = sessionProblem(s, others, now)
+    if (problem) throw new SessionError(problem)
+  }
+
   const sessions = {
     current(): Session | null {
       const r = db
@@ -81,6 +95,7 @@ export function createRepos(db: DB) {
       return rows.map(toSession)
     },
     add(s: { startTs: number; endTs: number | null; source: SessionSource; note?: string; projectId?: number | null }): Session {
+      assertValid(s)
       const info = db
         .prepare('INSERT INTO sessions (start_ts, end_ts, source, note, project_id) VALUES (?, ?, ?, ?, ?)')
         .run(s.startTs, s.endTs, s.source, s.note ?? '', s.projectId === undefined ? projects.defaultId() : s.projectId)
@@ -90,6 +105,7 @@ export function createRepos(db: DB) {
       const cur = getSession(id)
       if (!cur) return null
       const n = { ...cur, ...patch }
+      if (n.startTs !== cur.startTs || n.endTs !== cur.endTs) assertValid(n, id)
       db.prepare('UPDATE sessions SET start_ts=?, end_ts=?, source=?, note=?, project_id=? WHERE id=?').run(
         n.startTs,
         n.endTs,
@@ -154,21 +170,24 @@ export function createRepos(db: DB) {
   const settings = {
     get(): Settings {
       const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-      const out: Record<string, unknown> = { ...DEFAULT_SETTINGS }
+      const stored: Record<string, unknown> = {}
       for (const r of rows) {
-        if (!(r.key in DEFAULT_SETTINGS)) continue
         try {
-          out[r.key] = JSON.parse(r.value)
+          stored[r.key] = JSON.parse(r.value)
         } catch {
-          /* keep default */
+          /* broken value: the default applies */
         }
       }
-      return out as unknown as Settings
+      // Anything missing, unknown or out of range falls back to its default.
+      return readSettings(stored)
     },
+    /** Saves the valid keys of the patch; throws when any key is invalid, saving nothing. */
     set(patch: Partial<Settings>): Settings {
+      const { clean, rejected } = cleanPatch(patch as Record<string, unknown>)
+      if (rejected.length) throw new Error(`Invalid setting${rejected.length > 1 ? 's' : ''}: ${rejected.join(', ')}`)
       const ins = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
       db.transaction(() => {
-        for (const [k, v] of Object.entries(patch)) if (v !== undefined) ins.run(k, JSON.stringify(v))
+        for (const [k, v] of Object.entries(clean)) ins.run(k, JSON.stringify(v))
       })()
       return settings.get()
     }

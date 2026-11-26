@@ -44,7 +44,12 @@ export interface UpdateRelease {
   url: string
   prerelease: boolean
   /** The downloadable build for this Mac; null when the release has none. */
-  asset: { name: string; url: string; size: number; sha256: string | null } | null
+  asset: {
+    name: string
+    url: string
+    size: number
+    sha256: string | null
+  } | null
 }
 
 export type UpdatePhase = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error'
@@ -106,7 +111,49 @@ export interface Settings {
   autoCheckUpdates: boolean
   /** Version the user chose to skip; '' = none. */
   skippedUpdate: string
+  /** Minute interval offered when picking a time (1 = every minute). */
+  timeStep: number
+  /** Watch the German break rules (ArbZG): remind about breaks, flag days that break them. */
+  breakRules: boolean
+  /** Take a missed legal break off the counted time, the way payroll does. */
+  deductBreaks: boolean
+  /** Ask what to do with time away from the Mac (idle or asleep) once it is this long; 0 = never. */
+  idleMinutes: number
+  /** A session running this long is probably forgotten: ask, or stop it when you are away; 0 = never. */
+  maxSessionHours: number
+  /** Which macOS notifications TTT sends. */
+  notifications: NotificationSettings
+  /** Round session times on exports to this many minutes; 0 = exact. */
+  exportRoundMin: number
+  /** Start or pause from anywhere; an Electron accelerator, '' = off. */
+  globalShortcut: string
 }
+
+export interface NotificationSettings {
+  /** Wi-Fi started or stopped tracking. */
+  autoTrack: boolean
+  /** Today's expected hours are done. */
+  target: boolean
+  /** A legal break is due, or the day gets too long. */
+  breaks: boolean
+  /** A planned clock-out is coming up or happened. */
+  clockOut: boolean
+  /** A session has been running for very long. */
+  forgotten: boolean
+}
+
+/** Offered in Settings; the value is an Electron accelerator. */
+export const GLOBAL_SHORTCUTS: { value: string; label: string }[] = [
+  { value: '', label: 'Off' },
+  { value: 'Control+Alt+Space', label: '⌃⌥Space' },
+  { value: 'Control+Alt+Command+T', label: '⌃⌥⌘T' },
+  { value: 'Alt+Shift+T', label: '⌥⇧T' }
+]
+
+export const EXPORT_ROUNDING = [0, 5, 10, 15, 30] as const
+
+/** Minute intervals offered in Settings. */
+export const TIME_STEPS = [1, 5, 10, 15, 30] as const
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'system',
@@ -126,7 +173,29 @@ export const DEFAULT_SETTINGS: Settings = {
   projectMonthlyMin: {},
   onboarded: false,
   autoCheckUpdates: true,
-  skippedUpdate: ''
+  skippedUpdate: '',
+  timeStep: 15,
+  breakRules: true,
+  deductBreaks: false,
+  idleMinutes: 15,
+  maxSessionHours: 12,
+  notifications: { autoTrack: true, target: true, breaks: true, clockOut: true, forgotten: true },
+  exportRoundMin: 0,
+  globalShortcut: ''
 }
 
 export const DEFAULT_SCHEDULE: Schedule = [480, 480, 480, 480, 480, 0, 0]
+
+/** A database backup in the backups folder. */
+export interface BackupEntry {
+  name: string
+  /** Epoch ms. */
+  at: number
+  size: number
+  kind: 'daily' | 'migration' | 'manual' | 'import'
+}
+
+export interface BackupInfo {
+  dir: string
+  backups: BackupEntry[]
+}

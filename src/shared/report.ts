@@ -1,5 +1,6 @@
 import { addDays, dateKey, dayBalance, startOfDay, weekdayIndex } from './time'
 import { formatClock, formatDelta, formatDuration } from './format'
+import { breakDeduction, checkBreaks } from './breaks'
 import type { DayKind, DayOverride, Project, ProjectColor, Schedule, Session, Settings } from './types'
 
 export const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
@@ -29,6 +30,12 @@ export interface ReportDay {
   kind: DayKind | null
   /** After today: shown blank on the sheet. */
   future: boolean
+  /** Breaks of at least 15 min between sessions. */
+  breakMin: number
+  /** Missed legal break taken off the counted time (with deductBreaks). */
+  deductedMin: number
+  /** Why the day breaks the German break rules; null when it does not (or the rules are off). */
+  breakIssue: string | null
 }
 
 export interface MonthReport {
@@ -46,6 +53,26 @@ export interface MonthReport {
   /** Running balance at the end of the month (or today), starting balance included. */
   balanceAtEnd: number
   generatedAt: number
+  /** Session times were rounded to this many minutes; 0 = exact. */
+  roundMin: number
+  /** Days with a break-rule issue. */
+  breakIssues: number
+}
+
+/** ts rounded to the nearest `step` minutes of local time. */
+export function roundTs(ts: number, step: number): number {
+  if (step <= 1) return ts
+  const day = startOfDay(ts)
+  const ms = step * 60000
+  return day + Math.round((ts - day) / ms) * ms
+}
+
+/** What a day's break check says, in a few words; null when all is well. */
+export function breakIssueText(c: ReturnType<typeof checkBreaks>): string | null {
+  if (c.overMax) return 'Over 10 h'
+  if (c.missingMin > 0.5) return `${Math.round(c.missingMin)} min break missing`
+  if (c.stretchTooLong) return 'Over 6 h without a break'
+  return null
 }
 
 const pad = (n: number): string => String(n).padStart(2, '0')
@@ -56,7 +83,7 @@ export function buildMonthReport(o: {
   sessions: Session[]
   schedule: Schedule
   overrides: DayOverride[]
-  settings: Pick<Settings, 'creditKinds' | 'exportName'>
+  settings: Pick<Settings, 'creditKinds' | 'exportName'> & Partial<Pick<Settings, 'deductBreaks' | 'breakRules' | 'exportRoundMin'>>
   projects: Project[]
   balanceAtEnd: number
   now: number
@@ -69,6 +96,7 @@ export function buildMonthReport(o: {
   const colors = new Map(o.projects.map((p) => [p.name, p.color]))
   const byProject = new Map<string | null, number>()
   const days: ReportDay[] = []
+  const step = o.settings.exportRoundMin ?? 0
 
   for (let d = first; d < next; d = addDays(d, 1)) {
     const a = startOfDay(d)
@@ -76,17 +104,21 @@ export function buildMonthReport(o: {
     const segments: ReportSegment[] = []
     for (const s of o.sessions) {
       const end = s.endTs ?? o.now
-      const from = Math.max(s.startTs, a)
-      const to = Math.min(end, b)
+      const running = s.endTs === null && Math.min(end, b) === end
+      const from = roundTs(Math.max(s.startTs, a), step)
+      const to = running ? Math.min(end, b) : roundTs(Math.min(end, b), step)
       if (to <= from) continue
       const project = s.projectId != null ? (names.get(s.projectId) ?? null) : null
-      segments.push({ startTs: from, endTs: to, running: s.endTs === null && to === end, project, note: s.note })
+      segments.push({ startTs: from, endTs: to, running, project, note: s.note })
       byProject.set(project, (byProject.get(project) ?? 0) + (to - from) / 60000)
     }
     segments.sort((x, y) => x.startTs - y.startTs)
-    const trackedMin = segments.reduce((acc, s) => acc + (s.endTs - s.startTs) / 60000, 0)
+    // Time covered twice (overlapping sessions) counts once.
+    const check = checkBreaks(segments.map((x) => ({ a: x.startTs, b: x.endTs })))
+    const trackedMin = check.workedMin
+    const deductedMin = o.settings.deductBreaks ? breakDeduction(check.workedMin, check.breakMin) : 0
     const future = d > today
-    const stat = dayBalance(d, trackedMin, o.schedule, ov.get(d), o.settings)
+    const stat = dayBalance(d, trackedMin - deductedMin, o.schedule, ov.get(d), o.settings)
     days.push({
       date: d,
       weekday: weekdayIndex(d),
@@ -97,7 +129,10 @@ export function buildMonthReport(o: {
       deltaMin: future ? 0 : stat.deltaMin,
       credited: stat.credited,
       kind: ov.get(d)?.kind ?? null,
-      future
+      future,
+      breakMin: check.breakMin,
+      deductedMin,
+      breakIssue: o.settings.breakRules && !future ? breakIssueText(check) : null
     })
   }
 
@@ -114,7 +149,9 @@ export function buildMonthReport(o: {
     deltaMin: sum((d) => d.deltaMin),
     byProject: [...byProject.entries()].map(([name, minutes]) => ({ name, color: name !== null ? (colors.get(name) ?? null) : null, minutes })).sort((x, y) => y.minutes - x.minutes),
     balanceAtEnd: o.balanceAtEnd,
-    generatedAt: o.now
+    generatedAt: o.now,
+    roundMin: step,
+    breakIssues: days.filter((d) => d.breakIssue).length
   }
 }
 

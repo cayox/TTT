@@ -18,11 +18,17 @@ function dayRow(d: ReportDay): string {
   const projects = [...new Set(d.segments.map((s) => s.project ?? '–'))].map(esc).join(', ')
   const notes = [...new Set(d.segments.map((s) => s.note.trim()).filter(Boolean))].map(esc).join('; ')
   const show = !d.future && (d.expectedMin > 0 || d.countedMin > 0)
+  const brk = d.segments.length > 1 || d.breakMin > 0 ? formatDuration(d.breakMin) : ''
+  const flags = [
+    d.deductedMin > 0 ? `<span class="tag">${Math.round(d.deductedMin)} min break deducted</span>` : '',
+    d.breakIssue ? `<span class="tag warn">${esc(d.breakIssue)}</span>` : ''
+  ].join('')
   return `<tr class="${quiet ? 'quiet' : ''} ${d.weekday >= 5 ? 'weekend' : ''}">
     <td class="day">${dayLabel(d)}</td>
     <td class="num">${times}</td>
     <td>${projects}</td>
-    <td class="note">${notes}${d.credited && d.kind ? '<span class="tag">credited</span>' : ''}</td>
+    <td class="note">${notes}${d.credited && d.kind ? '<span class="tag">credited</span>' : ''}${flags}</td>
+    <td class="num r muted">${show ? brk : ''}</td>
     <td class="num r">${show ? formatDuration(d.countedMin) : ''}</td>
     <td class="num r muted">${show && d.expectedMin ? formatDuration(d.expectedMin) : ''}</td>
     <td class="num r ${signClass(d.deltaMin)}">${show ? formatDelta(d.deltaMin) : ''}</td>
@@ -63,6 +69,7 @@ export function timesheetHtml(r: MonthReport): string {
   .quiet td { color: #aaa296; }
   .pos { color: #3f6b33; }
   .neg { color: #a2412f; }
+  .tag.warn { color: #a2412f; border-color: #d9a597; }
   .tag { margin-left: 4pt; font-size: 7pt; color: #8a8174; border: 0.5pt solid #cfc8bc; border-radius: 2pt; padding: 0 2pt; }
   tfoot td { font-weight: 600; border-top: 1pt solid #24211c; border-bottom: 0; padding-top: 5pt; }
   .projects { margin: 0 0 10pt; color: #5f584d; }
@@ -93,9 +100,9 @@ export function timesheetHtml(r: MonthReport): string {
   }
 
   <table>
-    <thead><tr><th>Day</th><th>Time</th><th>Project</th><th>Note</th><th class="r">Worked</th><th class="r">Target</th><th class="r">+/−</th></tr></thead>
+    <thead><tr><th>Day</th><th>Time</th><th>Project</th><th>Note</th><th class="r">Break</th><th class="r">Worked</th><th class="r">Target</th><th class="r">+/−</th></tr></thead>
     <tbody>${r.days.map(dayRow).join('')}</tbody>
-    <tfoot><tr><td colspan="4">Total</td><td class="num r">${formatDuration(r.countedMin)}</td><td class="num r">${formatDuration(r.expectedMin)}</td><td class="num r ${signClass(r.deltaMin)}">${formatDelta(r.deltaMin)}</td></tr></tfoot>
+    <tfoot><tr><td colspan="5">Total</td><td class="num r">${formatDuration(r.countedMin)}</td><td class="num r">${formatDuration(r.expectedMin)}</td><td class="num r ${signClass(r.deltaMin)}">${formatDelta(r.deltaMin)}</td></tr></tfoot>
   </table>
 
   <section class="sign">
@@ -103,6 +110,8 @@ export function timesheetHtml(r: MonthReport): string {
     <div><div class="line"></div><p>Date, signature supervisor</p></div>
   </section>
 
-  <footer>Balance includes any starting balance and all tracked time up to the end of ${esc(r.title)}. Created with TTT, the Time Tracking Tool.</footer>
+  <footer>Balance includes any starting balance and all tracked time up to the end of ${esc(r.title)}.${
+    r.roundMin > 1 ? ` Times are rounded to ${r.roundMin} minutes.` : ''
+  }${r.breakIssues ? ` ${r.breakIssues} ${r.breakIssues === 1 ? 'day does' : 'days do'} not meet the break rules of the German Working Hours Act (ArbZG §3, §4).` : ''} Created with TTT, the Time Tracking Tool.</footer>
 </body></html>`
 }

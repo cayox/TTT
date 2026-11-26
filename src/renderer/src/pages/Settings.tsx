@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Archive, ArrowCounterClockwise, Clock, FolderSimple, Plus, SlidersHorizontal, Star, Trash, WifiHigh, X } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, Clock, Database, FolderSimple, Plus, SlidersHorizontal, Star, Trash, WifiHigh, X } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 import { Badge, Button, Card, ColorPicker, DurationField, IconButton, Input, Modal, NumberField, Page, ProjectDot, ProjectLabel, ProjectSelect, Segmented, Toggle, cx } from '../components/ui'
 import { WeekEditor } from '../components/WeekEditor'
@@ -15,8 +15,8 @@ import { compareVersions } from '../../../shared/version'
 import type { ChangelogEntry } from '../../../shared/changelog'
 import type { Theme } from '../lib/theme'
 import { DEFAULT_SCHEDULE, DEFAULT_SETTINGS } from '../../../shared/types'
-import { PROJECT_COLORS } from '../../../shared/types'
-import type { CurrentNetwork, DayKind, LocationStatus, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
+import { EXPORT_ROUNDING, GLOBAL_SHORTCUTS, PROJECT_COLORS, TIME_STEPS } from '../../../shared/types'
+import type { BackupInfo, CurrentNetwork, DayKind, LocationStatus, NotificationSettings, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
 import { formatDurationLong } from '../../../shared/format'
 
 const CREDIT: { kind: DayKind; label: string }[] = [
@@ -99,7 +99,14 @@ function WhatsNew({ open, onClose, version }: { open: boolean; onClose: () => vo
   )
 }
 
-function ProjectRow({ project, isDefault, used, onMakeDefault }: { project: Project; isDefault: boolean; used: number; onMakeDefault: () => void }) {
+function ProjectRow({ project, isDefault, used, onMakeDefault, onArchived }: {
+  project: Project
+  isDefault: boolean
+  used: number
+  onMakeDefault: () => void
+  /** Extra toast action after archiving, e.g. moving its monthly hours. */
+  onArchived?: () => { label: string; onClick: () => void } | null
+}) {
   const [name, setName] = useState(project.name)
   const [picking, setPicking] = useState(false)
   const toast = useToast()
@@ -117,12 +124,15 @@ function ProjectRow({ project, isDefault, used, onMakeDefault }: { project: Proj
   }
   const update = (patch: Partial<Omit<Project, 'id'>>): Promise<boolean> => call(() => window.api['projects:update'](project.id, patch), `Couldn't update ${project.name}`)
   const archive = async (): Promise<void> => {
-    if (await update({ archived: true }))
+    if (await update({ archived: true })) {
+      const extra = onArchived?.()
       toast.success(`${project.name} archived`, {
         id: `project-${project.id}`,
-        description: 'Hidden from pickers. Its sessions keep the project.',
-        actions: [{ label: 'Undo', onClick: () => void update({ archived: false }) }]
+        description: extra ? 'Hidden from pickers. Its monthly hours no longer count.' : 'Hidden from pickers. Its sessions keep the project.',
+        duration: extra ? null : undefined,
+        actions: [{ label: 'Undo', onClick: () => void update({ archived: false }) }, ...(extra ? [extra] : [])]
       })
+    }
   }
   const restore = async (): Promise<void> => {
     if (await update({ archived: false })) toast.success(`${project.name} restored`, { id: `project-${project.id}` })
@@ -216,7 +226,30 @@ function ProjectsSection({ settings, patch }: { settings: Settings; patch: (p: P
   return (
     <Section title="Projects" description="Every session belongs to a project. New sessions use the default (starred) unless you pick another one in the top bar or on Today.">
       {active.map((p) => (
-        <ProjectRow key={p.id} project={p} isDefault={p.id === defaultId} used={usage[p.id] ?? 0} onMakeDefault={() => patch({ defaultProjectId: p.id })} />
+        <ProjectRow
+          key={p.id}
+          project={p}
+          isDefault={p.id === defaultId}
+          used={usage[p.id] ?? 0}
+          onMakeDefault={() => patch({ defaultProjectId: p.id })}
+          onArchived={() => {
+            // Hours from the contract should not vanish with the project: offer them to the default one.
+            const min = settings.monthlyHoursByProject ? (settings.projectMonthlyMin[String(p.id)] ?? 0) : 0
+            const target = active.find((x) => x.id === defaultId && x.id !== p.id)
+            if (!min || !target) return null
+            return {
+              label: `Move ${formatDurationLong(min)} to ${target.name}`,
+              onClick: () =>
+                patch({
+                  projectMonthlyMin: {
+                    ...settings.projectMonthlyMin,
+                    [String(target.id)]: (settings.projectMonthlyMin[String(target.id)] ?? 0) + min,
+                    [String(p.id)]: 0
+                  }
+                })
+            }
+          }}
+        />
       ))}
       <form
         className="flex items-center gap-2 px-4 py-3"
@@ -240,13 +273,174 @@ function ProjectsSection({ settings, patch }: { settings: Settings; patch: (p: P
   )
 }
 
-type PaneId = 'work' | 'projects' | 'auto' | 'general'
+type PaneId = 'work' | 'projects' | 'auto' | 'general' | 'data'
 const PANES: { id: PaneId; label: string; icon: Icon }[] = [
   { id: 'work', label: 'Work time', icon: Clock },
   { id: 'projects', label: 'Projects', icon: FolderSimple },
-  { id: 'auto', label: 'Automatic tracking', icon: WifiHigh },
-  { id: 'general', label: 'General', icon: SlidersHorizontal }
+  { id: 'auto', label: 'Tracking', icon: WifiHigh },
+  { id: 'general', label: 'General', icon: SlidersHorizontal },
+  { id: 'data', label: 'Data & export', icon: Database }
 ]
+
+const NOTIFY: { key: keyof NotificationSettings; label: string; description: string }[] = [
+  { key: 'autoTrack', label: 'Automatic tracking', description: 'When Wi-Fi starts or stops the timer.' },
+  { key: 'target', label: "Today's hours done", description: 'When you reach your expected time.' },
+  { key: 'breaks', label: 'Breaks', description: 'When a legal break is due or the day gets close to 10 hours.' },
+  { key: 'clockOut', label: 'Planned clock-out', description: 'Ten minutes before, and when it happens.' },
+  { key: 'forgotten', label: 'Forgotten sessions', description: 'When a session has run for very long.' }
+]
+
+const KIND_NAME: Record<BackupInfo['backups'][number]['kind'], string> = { daily: 'Daily', migration: 'Before update', manual: 'Manual', import: 'Before import' }
+const fmtSize = (b: number): string => (b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`)
+
+/** Backups, full export/import and diagnostics. */
+function DataPane({ settings, patch }: { settings: Settings; patch: (p: Partial<Settings>) => void }) {
+  const toast = useToast()
+  const [info, setInfo] = useState<BackupInfo | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  const load = useCallback(() => void window.api['data:backups']().then(setInfo, () => setInfo({ dir: '', backups: [] })), [])
+  useEffect(load, [load])
+  const run = async <T,>(fn: () => Promise<T>, fail: string): Promise<T | undefined> => {
+    try {
+      return await fn()
+    } catch (e) {
+      toast.error(fail, { description: errorText(e) })
+      return undefined
+    }
+  }
+  const saved = (title: string, path: string | null | undefined): void => {
+    if (path)
+      toast.success(title, {
+        id: 'data',
+        description: path.split('/').pop(),
+        actions: [{ label: 'Show in Finder', onClick: () => void window.api['export:revealLast']() }]
+      })
+  }
+  const backups = info?.backups ?? []
+  const shown = showAll ? backups : backups.slice(0, 5)
+  return (
+    <>
+      <Section title="Exports" description="Timesheets, CSV and calendar files for a month are in History → Export.">
+        <Row title="Name on timesheets" description="Printed on PDF timesheets and at the top of WhatsApp summaries.">
+          <div className="w-56">
+            <Input
+              aria-label="Name on timesheets"
+              placeholder="Your name"
+              defaultValue={settings.exportName}
+              onBlur={(e) => e.target.value.trim() !== settings.exportName && patch({ exportName: e.target.value.trim() })}
+              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+            />
+          </div>
+        </Row>
+        <Row
+          title="Round times"
+          description={
+            settings.exportRoundMin
+              ? `Exports show start and end rounded to the nearest ${settings.exportRoundMin} minutes. Your balance keeps the exact times.`
+              : 'Exports show the exact times.'
+          }
+        >
+          <Segmented
+            size="sm"
+            label="Round times on exports"
+            value={String(settings.exportRoundMin)}
+            onChange={(v) => patch({ exportRoundMin: Number(v) })}
+            options={EXPORT_ROUNDING.map((n) => ({ value: String(n), label: n === 0 ? 'Exact' : `${n} min` }))}
+          />
+        </Row>
+      </Section>
+
+      <Section title="All your data" description="Everything stays on this Mac. Export it to keep a copy, or to move TTT to another Mac.">
+        <Row title="Export" description="JSON holds everything and can be imported again. CSV lists every session for a spreadsheet.">
+          <span className="flex gap-2">
+            <Button size="sm" variant="secondary" onClick={async () => saved('Data exported', await run(() => window.api['data:exportJson'](), 'Export failed'))}>
+              JSON…
+            </Button>
+            <Button size="sm" variant="secondary" onClick={async () => saved('Sessions exported', await run(() => window.api['data:exportCsv'](), 'Export failed'))}>
+              CSV…
+            </Button>
+          </span>
+        </Row>
+        <Row title="Import" description="Replaces everything in TTT with a JSON export. Your current data is backed up first.">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              const ok = await run(() => window.api['data:import'](), "Couldn't import that file")
+              if (ok) (toast.success('Data imported', { description: 'TTT now shows the imported data.' }), load())
+            }}
+          >
+            Import JSON…
+          </Button>
+        </Row>
+      </Section>
+
+      <Section title="Backups" description="TTT backs up its database once a day and keeps two weeks, plus a copy before every database upgrade and before imports or restores.">
+        {backups.length === 0 ? (
+          <p className="px-4 py-3.5 text-xs text-muted">No backups yet. The first one is made today.</p>
+        ) : (
+          <ul aria-label="Backups" className="divide-y divide-line">
+            {shown.map((b) => (
+              <li key={b.name} className="flex items-center gap-3 px-4 py-2 text-[13px]">
+                <span className="tnum min-w-0 flex-1">{new Date(b.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                <Badge>{KIND_NAME[b.kind]}</Badge>
+                <span className="tnum w-16 text-right text-xs text-faint">{fmtSize(b.size)}</span>
+                <Button size="sm" variant="ghost" onClick={() => void run(() => window.api['data:restore'](b.name), "Couldn't restore the backup")}>
+                  Restore…
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={async () => {
+              if (await run(() => window.api['data:backupNow'](), 'Backup failed')) (toast.success('Backup saved', { id: 'data' }), load())
+            }}
+          >
+            Back up now
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => void window.api['data:openBackups']()}>
+            Show in Finder
+          </Button>
+          {backups.length > 5 && (
+            <Button size="sm" variant="ghost" className="ml-auto" aria-expanded={showAll} onClick={() => setShowAll((v) => !v)}>
+              {showAll ? 'Show fewer' : `Show all (${backups.length})`}
+            </Button>
+          )}
+        </div>
+      </Section>
+
+      <Section title="Troubleshooting" description="For bug reports on GitHub. Diagnostics list versions, counts and recent errors, never your sessions, notes or network names.">
+        <Row title="Diagnostics">
+          <span className="flex gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                const text = await run(() => window.api['app:diagnostics'](), "Couldn't collect diagnostics")
+                if (!text) return
+                try {
+                  await navigator.clipboard.writeText(text)
+                  toast.success('Diagnostics copied', { description: 'Paste them into your GitHub issue.' })
+                } catch (e) {
+                  toast.error("Couldn't copy", { description: errorText(e) })
+                }
+              }}
+            >
+              Copy diagnostics
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => void window.api['app:revealLog']()}>
+              Show log file
+            </Button>
+          </span>
+        </Row>
+      </Section>
+    </>
+  )
+}
 const PANE_KEY = 'ttt-settings-pane'
 function storedPane(): PaneId {
   try {
@@ -547,8 +741,88 @@ export function SettingsPage() {
           </div>
         </div>
       </Section>
+
+      <Section
+        title="Breaks"
+        description="The German Working Hours Act (ArbZG) asks for 30 minutes of breaks after 6 hours of work and 45 after 9, in pieces of at least 15 minutes, and allows at most 10 hours a day."
+      >
+        <div className="px-4 py-3.5">
+          <Toggle
+            checked={settings.breakRules}
+            onChange={(v) => patch({ breakRules: v })}
+            label="Watch the break rules"
+            description="Reminds you when a break is due, plans it into the finish time on Today, and flags days that miss it in History and on timesheets."
+          />
+        </div>
+        <div className="px-4 py-3.5">
+          <Toggle
+            checked={settings.deductBreaks}
+            onChange={(v) => patch({ deductBreaks: v })}
+            label="Deduct missed breaks"
+            description="Takes a missed break off the counted time, as most payroll systems do. 6 h 20 min without a break counts as 6 h."
+          />
+        </div>
+      </Section>
+
+      <Section title="Time entry" description="How times are picked when you add or edit a session, or set when you clock out.">
+        <Row title="Interval" description={settings.timeStep === 1 ? 'Any minute can be entered.' : `Times snap to ${settings.timeStep}-minute steps, like 08:00, 08:${String(settings.timeStep).padStart(2, '0')} and so on.`}>
+          <Segmented
+            size="sm"
+            label="Time interval"
+            value={String(settings.timeStep)}
+            onChange={(v) => patch({ timeStep: Number(v) })}
+            options={TIME_STEPS.map((n) => ({ value: String(n), label: n === 1 ? 'Any' : `${n} min` }))}
+          />
+        </Row>
+      </Section>
     </>
   )
+
+  const away = (
+    <Section title="Away from your Mac" description="Catches time that should not count: a lunch with the timer running, a lid closed for the night, a session you forgot to stop.">
+      <Row
+        title="Ask about time away"
+        description={
+          settings.idleMinutes
+            ? `After ${settings.idleMinutes} minutes without using your Mac, or a sleep that long, TTT asks when you are back whether it was work.`
+            : 'Time away always counts as work.'
+        }
+      >
+        <Segmented
+          size="sm"
+          label="Ask about time away after"
+          value={String(settings.idleMinutes)}
+          onChange={(v) => patch({ idleMinutes: Number(v) })}
+          options={[0, 10, 15, 30, 60].map((n) => ({ value: String(n), label: n === 0 ? 'Never' : `${n} min` }))}
+        />
+      </Row>
+      <Row
+        title="Forgotten sessions"
+        description={
+          settings.maxSessionHours
+            ? `A session running ${settings.maxSessionHours} hours is ended when you were last at your Mac. If you are still there, TTT asks instead.`
+            : 'Sessions run until you stop them.'
+        }
+      >
+        <Segmented
+          size="sm"
+          label="Treat sessions as forgotten after"
+          value={String(settings.maxSessionHours)}
+          onChange={(v) => patch({ maxSessionHours: Number(v) })}
+          options={[0, 10, 12, 14].map((n) => ({ value: String(n), label: n === 0 ? 'Never' : `${n} h` }))}
+        />
+      </Row>
+    </Section>
+  )
+
+  const setShortcut = (accel: string): void => {
+    const before = settings.globalShortcut
+    setSettings((s) => ({ ...s, globalShortcut: accel }))
+    window.api['settings:set']({ globalShortcut: accel }).then(flash, (e) => {
+      setSettings((s) => ({ ...s, globalShortcut: before }))
+      toast.error("Couldn't use that shortcut", { id: 'settings-saved', description: errorText(e) })
+    })
+  }
 
   const auto = (
     <Section title="Automatic tracking" description="Start and stop the timer with the Wi-Fi network you are on. You can always start and pause by hand.">
@@ -685,17 +959,6 @@ export function SettingsPage() {
         <div className="px-4 py-3.5">
           <Toggle checked={settings.launchAtLogin} onChange={(v) => patch({ launchAtLogin: v })} label="Open at login" description="Starts quietly in the menu bar." />
         </div>
-        <Row title="Name on timesheets" description="Printed on PDF timesheets and at the top of WhatsApp summaries. Export from History.">
-          <div className="w-56">
-            <Input
-              aria-label="Name on timesheets"
-              placeholder="Your name"
-              defaultValue={settings.exportName}
-              onBlur={(e) => e.target.value.trim() !== settings.exportName && patch({ exportName: e.target.value.trim() })}
-              onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-            />
-          </div>
-        </Row>
         <Row title="Version" description="TTT is in beta. Your data stays on this Mac, but expect rough edges and report anything odd on GitHub.">
           <span className="flex items-center gap-2">
             <span className="tnum text-[13px] text-muted">{version}</span>
@@ -747,11 +1010,34 @@ export function SettingsPage() {
           </Button>
         </Row>
       </Section>
+      <Section title="Notifications" description="macOS notifications TTT sends. You can also turn them off for TTT in System Settings → Notifications.">
+        {NOTIFY.map((n) => (
+          <div key={n.key} className="px-4 py-3">
+            <Toggle
+              checked={settings.notifications[n.key]}
+              onChange={(v) => patch({ notifications: { ...settings.notifications, [n.key]: v } })}
+              label={n.label}
+              description={n.description}
+            />
+          </div>
+        ))}
+      </Section>
       <Section title="Keyboard shortcuts">
+        <Row title="Start or pause from anywhere" description="Works in every app, even with the TTT window closed. A notification confirms each press.">
+          <Segmented size="sm" label="Global shortcut" value={settings.globalShortcut} onChange={setShortcut} options={GLOBAL_SHORTCUTS} />
+        </Row>
         {SHORTCUTS.map(([keys, what]) => (
           <div key={what} className="flex items-center justify-between gap-4 px-4 py-2.5 text-[13px]">
             <span className="text-muted">{what}</span>
             <span className="flex items-center gap-1">{keys}</span>
+          </div>
+        ))}
+      </Section>
+      <Section title="Links" description="Open these from Shortcuts, a Focus mode, Raycast or Alfred to control TTT.">
+        {LINKS.map(([url, what]) => (
+          <div key={url} className="flex items-center justify-between gap-4 px-4 py-2.5 text-[13px]">
+            <span className="text-muted">{what}</span>
+            <code className="tnum select-all rounded bg-sunken px-1.5 py-0.5 text-xs">{url}</code>
           </div>
         ))}
       </Section>
@@ -784,8 +1070,14 @@ export function SettingsPage() {
         <div key={pane} className="rise flex min-w-0 flex-col gap-8">
           {pane === 'work' && work}
           {pane === 'projects' && <ProjectsSection settings={settings} patch={patch} />}
-          {pane === 'auto' && auto}
+          {pane === 'auto' && (
+            <>
+              {auto}
+              {away}
+            </>
+          )}
           {pane === 'general' && general}
+          {pane === 'data' && <DataPane settings={settings} patch={patch} />}
         </div>
       </div>
       <WhatsNew open={whatsNew} onClose={() => setWhatsNew(false)} version={version} />
@@ -798,4 +1090,12 @@ const SHORTCUTS: [ReactNode, string][] = [
   [<kbd>Space</kbd>, 'Start or pause on Today'],
   [<><kbd>⌘1</kbd> to <kbd>⌘4</kbd></>, 'Switch pages'],
   [<><kbd>←</kbd><kbd>→</kbd></>, 'Previous or next month in History']
+]
+
+const LINKS: [string, string][] = [
+  ['ttt://start', 'Start on your usual project'],
+  ['ttt://start?project=Name', 'Start on a project, or switch to it'],
+  ['ttt://pause', 'Pause'],
+  ['ttt://toggle', 'Start or pause'],
+  ['ttt://open?page=history', 'Open a page (today, history, stats, settings)']
 ]

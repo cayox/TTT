@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { CaretDown, Copy, Export, FilePdf, WhatsappLogo } from '@phosphor-icons/react'
+import { CalendarPlus, CaretDown, Copy, Export, FileCsv, FilePdf, WhatsappLogo } from '@phosphor-icons/react'
 import { Button } from './ui'
 import { errorText, useToast } from '../lib/toast'
 
@@ -77,6 +77,19 @@ export function ExportMenu({ year, month, label }: { year: number; month: number
         ]
       })
     })
+  const saved = (title: string, path: string | null): void => {
+    if (!path) return
+    toast.success(title, {
+      id: 'export',
+      description: path.split('/').pop(),
+      actions: [
+        { label: 'Open', onClick: () => void window.api['export:openLast']() },
+        { label: 'Show in Finder', onClick: () => void window.api['export:revealLast']() }
+      ]
+    })
+  }
+  const csv = (): Promise<void> => act(async () => saved('Sessions saved as CSV', await window.api['export:csv'](year, month)))
+  const ics = (): Promise<void> => act(async () => saved('Calendar file saved', await window.api['export:ics'](year, month)))
   const copy = (): Promise<void> =>
     act(async () => {
       await window.api['export:copyText'](year, month)
@@ -113,6 +126,8 @@ export function ExportMenu({ year, month, label }: { year: number; month: number
             hint="A4 with daily times, totals and signature lines"
             onClick={() => void pdf()}
           />
+          <Item icon={<FileCsv size={17} />} title="Sessions as CSV…" hint="One row per session, for Excel or Numbers" onClick={() => void csv()} />
+          <Item icon={<CalendarPlus size={17} />} title="Calendar file…" hint="Sessions as events (.ics) for Calendar or Outlook" onClick={() => void ics()} />
           <Item
             icon={<Copy size={17} />}
             title="Copy for WhatsApp"

@@ -32,7 +32,8 @@ export function SessionEditor({ date, initial, onSave, onCancel, compact }: {
   /** Hide the note field (quick edit on Today). */
   compact?: boolean
 }) {
-  const { projects, nextProjectId } = useTracker()
+  const { projects, nextProjectId, settings } = useTracker()
+  const step = settings?.timeStep ?? 15
   const running = !!initial && initial.endTs === null
   const [projectId, setProjectId] = useState<number | null>(initial ? initial.projectId : nextProjectId)
   const [startDate, setStartDate] = useState(initial ? dateKey(initial.startTs) : date)
@@ -90,7 +91,7 @@ export function SessionEditor({ date, initial, onSave, onCancel, compact }: {
       <div className="flex flex-wrap items-start gap-3">
         <fieldset className="m-0 flex items-end gap-1.5 border-0 p-0">
           <div className="w-[8.5rem]"><Input type="date" label="Start" invalid={badStart} value={startDate} onChange={(e) => setStartDate(e.target.value)} className="[color-scheme:inherit]" /></div>
-          <div className="w-[5.5rem]"><TimeField ariaLabel="Start time" invalid={badStart} value={start} onChange={setStart} /></div>
+          <div className="w-[5.5rem]"><TimeField ariaLabel="Start time" invalid={badStart} value={start} onChange={setStart} step={step} /></div>
         </fieldset>
         {running ? (
           <div className="flex flex-col gap-1.5">
@@ -100,7 +101,7 @@ export function SessionEditor({ date, initial, onSave, onCancel, compact }: {
         ) : (
           <fieldset className="m-0 flex items-end gap-1.5 border-0 p-0">
             <div className="w-[8.5rem]"><Input type="date" label="End" invalid={badEnd} value={endDate} onChange={(e) => setEndDate(e.target.value)} className="[color-scheme:inherit]" /></div>
-            <div className="w-[5.5rem]"><TimeField ariaLabel="End time" invalid={badEnd} value={end} onChange={setEnd} /></div>
+            <div className="w-[5.5rem]"><TimeField ariaLabel="End time" invalid={badEnd} value={end} onChange={setEnd} step={step} /></div>
           </fieldset>
         )}
         <div className="w-44"><ProjectSelect label="Project" projects={projects} value={projectId} onChange={setProjectId} /></div>

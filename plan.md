@@ -77,12 +77,12 @@ src/
   - **Spike result (Darwin 25):** `networksetup -getairportnetwork en0` wrongly reports "not associated"; `ipconfig getsummary en0` and `system_profiler SPAirPortDataType` return `<redacted>` for SSID/BSSID; `wdutil info` needs sudo. So nothing works without Location permission. Fallback: CoreWLAN Swift helper at src/main/wifi/helper/ssid.swift (build note inside; needs NSLocationUsageDescription in Info.plist, Location permission granted to the app, and com.apple.security.personal-information.location entitlement if sandboxed/signed hardened). src/main/wifi/ssid.ts tries networksetup, then the helper (TTT_SSID_HELPER or Resources/ssid-helper).
 - [x] 4.2 Watcher with debounce + grace period, source='wifi' sessions
 - [ ] 4.3 Settings UI: detect current network, choose work SSID(s), status indicator
-- [ ] 4.4 Notifications on auto start/stop
+- [x] 4.4 Notifications on auto start/stop
 
 ### Phase 5: Polish
 - [ ] 5.1 Holidays/vacation day overrides
 - [ ] 5.2 Export: .docx timesheet (with signature lines) + Markdown/WhatsApp text
-- [ ] 5.3 Empty states, animations, keyboard shortcuts, a11y pass
+- [x] 5.3 Empty states, animations, keyboard shortcuts, a11y pass
 - [x] 5.4 App icon, packaging (electron-builder dmg)
 - [ ] 5.5 Final review (/code-review) and README
 
@@ -113,3 +113,4 @@ src/
 - 2026-09-19: Monthly goal: settings.monthlyGoalMin (0=off); shared/goal.ts monthGoal/monthTotals (+tests); IPC stats:goal, stats:months. Today goal block (live while running), Stats 6-month goal card, Settings section with Match schedule.
 - 2026-09-19: Brand + release: Wordmark/BrandMark (components/ui/Brand.tsx) in the top bar; tray glyph is a progress ring (today's worked / expected, center dot while running, monospaced title). First-run onboarding (components/Onboarding.tsx: welcome, work week sliders, projects, Wi-Fi + login, ready) gated by settings.onboarded (migration #4 marks existing installs done), reopenable from Settings > App. Packaging: electron-builder.yml (ad-hoc signed, dmg+zip arm64/x64, ssid-helper via npm run helper), `npm run dist`; .github/workflows/release.yml publishes a release on v* tags. README with dark screenshots in docs/screenshots.
 - 2026-09-19: Monthly goal became monthly contract hours with flextime (Gleitzeit): shared/hours.ts (monthHours, flexNow, contractMinutes; pace follows the schedule), settings monthlyHoursMin / monthlyHoursByProject / projectMonthlyMin (migration #5 renames monthlyGoalMin), IPC stats:month. Today shows hours left, per workday, flextime, per-project rows. Settings reorganized into panes (Work time, Projects, Automatic tracking, General) with shared components/WeekEditor.tsx (also used by onboarding). Header wordmark "TTT - Time Tracking Tool". Ring glow no longer clipped.
+- 2026-11-26: Robustness + smart features. shared/{intervals,validate,settings,breaks,data,suggest,missing}.ts; repos validate sessions (no overlaps/backwards/future, SessionError) and sanitize settings on read/write; day totals use interval union (+ optional ArbZG break deduction). main/db/backup.ts (VACUUM INTO daily/manual/pre-migration/import backups, pruning, quick_check at startup with restore offer), main/data.ts (JSON export/import, CSV, restore), main/away.ts (idle + sleep prompt, forgotten sessions), main/coach.ts (target/break reminders), main/notify.ts, main/log.ts (log file + diagnostics), main/url.ts (ttt:// scheme), global shortcut, sandboxed renderer. UI: Today break stat/finish incl. break/missing days/pace/usual project; History overlap + break badges, search/filter, open-day nav (lib/nav.ts); Export menu CSV/ICS; Settings breaks, away, notifications, shortcut, links, Data & export pane. Vacation budget and public holidays deliberately left out (user decision). Added .prettierrc matching the code style so the format hook keeps it.

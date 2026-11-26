@@ -8,6 +8,8 @@ declare global {
       onSessionsChanged: (cb: () => void) => () => void
       onProjectsChanged: (cb: () => void) => () => void
       onUpdateChanged: (cb: (state: UpdateState) => void) => () => void
+      onDataReplaced: (cb: () => void) => () => void
+      onNavigate: (cb: (page: string) => void) => () => void
     }
   }
 }

@@ -25,8 +25,11 @@
 - **Projects.** Every session belongs to a project, so you can see where the time went, today and over any range.
 - **Days off.** Mark vacation, sick days and holidays in History. Credited days count as a full workday, so they never leave a deficit.
 - **Monthly hours with flextime.** Enter the hours from your contract, in total or per project. With flextime (Gleitzeit) TTT shows what is left this month, what each remaining workday needs, and how far ahead or behind you are.
-- **Export.** A printable A4 timesheet as PDF with signature lines, or a short summary for WhatsApp.
-- **Private.** Everything is stored locally in SQLite. No account, no server.
+- **Breaks done right.** TTT knows the German break rules (30 min after 6 h, 45 after 9 h, at most 10 h a day), reminds you, plans the break into your finish time and flags days that miss it. It can also deduct a missed break, the way payroll does.
+- **No phantom hours.** Away from your Mac for a while, or the lid closed with the timer running? TTT asks when you are back whether that was work. A session left running all night is caught and ended when you were last there.
+- **Smart nudges.** Notifications when your hours are done, a break is due or a planned clock-out is near; workdays you forgot to track; your usual project for this time of day; when you will finish your monthly hours at your current pace.
+- **Export.** A printable A4 timesheet as PDF with signature lines, a short summary for WhatsApp, CSV for spreadsheets or a calendar file. Optional rounding to 5–30 minutes.
+- **Private and safe.** Everything is stored locally in SQLite. No account, no server. TTT backs up its database every day, keeps two weeks of backups, and can export or import everything as one JSON file.
 
 ## Screenshots
 
@@ -47,7 +50,7 @@
 xattr -dr com.apple.quarantine /Applications/TTT.app
 ```
 
-macOS only reveals Wi-Fi names to apps with Location access, so TTT asks for it when you switch automatic tracking on — during onboarding or in Settings → Automatic tracking, which also has an **Allow location access** button. Say no and everything still works: TTT then recognizes a work network by its router instead of its name. Because the app is only ad-hoc signed, macOS may ask again after an update.
+macOS only reveals Wi-Fi names to apps with Location access, so TTT asks for it when you switch automatic tracking on — during onboarding or in Settings → Tracking, which also has an **Allow location access** button. Say no and everything still works: TTT then recognizes a work network by its router instead of its name. Because the app is only ad-hoc signed, macOS may ask again after an update.
 
 ## Updates
 
@@ -65,6 +68,20 @@ Every change is written down in [CHANGELOG.md](CHANGELOG.md), which is also what
 | <kbd>Space</kbd>                                     | Start or pause on Today             |
 | <kbd>⌘</kbd><kbd>1</kbd> to <kbd>⌘</kbd><kbd>4</kbd> | Today, History, Stats, Settings     |
 | <kbd>←</kbd> <kbd>→</kbd>                            | Previous or next month in History   |
+
+A global shortcut to start or pause from any app can be switched on in **Settings → General**.
+
+## Links
+
+TTT answers `ttt://` links, so Shortcuts, Focus modes, Raycast or Alfred can control it:
+
+| Link                       | Action                                      |
+| -------------------------- | ------------------------------------------- |
+| `ttt://start`              | Start on your usual project                 |
+| `ttt://start?project=Acme` | Start on a project (or switch to it)        |
+| `ttt://pause`              | Pause                                       |
+| `ttt://toggle`             | Start or pause                              |
+| `ttt://open?page=history`  | Open a page: today, history, stats, settings |
 
 ## Development
 

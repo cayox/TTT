@@ -1,4 +1,4 @@
-import { addDays, dateKey, dayBalance, expectedMinutesForDay, projectTotals, startOfDay, workedMinutesByDay } from './time'
+import { addDays, dateKey, dayBalance, expectedMinutesForDay, projectTotals, startOfDay, workedMinutesByDay, type CountSettings } from './time'
 import type { DayOverride, Schedule, Session, Settings } from './types'
 
 /**
@@ -27,6 +27,29 @@ export interface MonthHours {
   todayShareMin: number
   /** Per project, when the hours are split by project. Counted is actual time on the project. */
   projects: { projectId: number; contractMin: number; countedMin: number }[]
+  /** Scheduled workdays before today this month. */
+  workdaysPassed: number
+  /**
+   * At the pace of this month's workdays so far: the day the monthly hours will be done, or null
+   * when they are done already, there is no pace yet, or the pace does not get there this month.
+   */
+  projectedFinish: string | null
+  /** At that pace, how much would be missing at month end (0 when it gets there). */
+  projectedShortMin: number
+}
+
+/** Walks the remaining workdays at the average pace so far. */
+function projection(days: { date: string; countedMin: number; expectedMin: number }[], today: string, contractMin: number, countedMin: number) {
+  const past = days.filter((x) => x.date < today && x.expectedMin > 0)
+  const pace = past.length ? past.reduce((a, x) => a + x.countedMin, 0) / past.length : 0
+  let left = contractMin - countedMin
+  if (left <= 0 || pace <= 0) return { workdaysPassed: past.length, projectedFinish: null, projectedShortMin: 0 }
+  for (const x of days) {
+    if (x.date < today || x.expectedMin <= 0) continue
+    left -= x.date === today ? Math.max(0, pace - x.countedMin) : pace
+    if (left <= 0) return { workdaysPassed: past.length, projectedFinish: x.date, projectedShortMin: 0 }
+  }
+  return { workdaysPassed: past.length, projectedFinish: null, projectedShortMin: left }
 }
 
 export interface MonthTotal {
@@ -42,7 +65,7 @@ interface Input {
   sessions: Session[]
   schedule: Schedule
   overrides: DayOverride[]
-  settings: Pick<Settings, 'creditKinds'>
+  settings: CountSettings
   now: number
 }
 
@@ -66,7 +89,7 @@ export function monthHours(o: Input & { contractMin: number; projectMin?: Record
   const y = d.getFullYear()
   const m = d.getMonth()
   const today = dateKey(o.now)
-  const days = monthDays(o, y, m, workedMinutesByDay(o.sessions, o.now))
+  const days = monthDays(o, y, m, workedMinutesByDay(o.sessions, o.now, o.settings))
 
   const split = o.projectMin ? Object.entries(o.projectMin).filter(([, v]) => v > 0) : null
   const contractMin = split ? split.reduce((a, [, v]) => a + v, 0) : o.contractMin
@@ -102,7 +125,8 @@ export function monthHours(o: Input & { contractMin: number; projectMin?: Record
     flexBeforeTodayMin,
     todayCountedMin,
     todayShareMin,
-    projects: (split ?? []).map(([id, v]) => ({ projectId: Number(id), contractMin: v, countedMin: worked.get(Number(id)) ?? 0 }))
+    projects: (split ?? []).map(([id, v]) => ({ projectId: Number(id), contractMin: v, countedMin: worked.get(Number(id)) ?? 0 })),
+    ...projection(days, today, contractMin, countedMin)
   }
 }
 
@@ -120,7 +144,7 @@ export function contractMinutes(s: Pick<Settings, 'monthlyHoursMin' | 'monthlyHo
 /** Counted and scheduled totals for the last `count` months, oldest first, current month last. */
 export function monthTotals(o: Input & { count: number }): MonthTotal[] {
   const d = new Date(o.now)
-  const worked = workedMinutesByDay(o.sessions, o.now)
+  const worked = workedMinutesByDay(o.sessions, o.now, o.settings)
   const out: MonthTotal[] = []
   for (let i = o.count - 1; i >= 0; i--) {
     const at = new Date(d.getFullYear(), d.getMonth() - i, 1)

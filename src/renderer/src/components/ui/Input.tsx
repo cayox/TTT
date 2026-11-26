@@ -2,6 +2,7 @@ import { useEffect, useId, useState } from 'react'
 import { Minus, Plus } from '@phosphor-icons/react'
 import type { InputHTMLAttributes, ReactNode, Ref } from 'react'
 import { cx } from './cx'
+import { minuteOptions } from '../../../../shared/slots'
 
 export interface InputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'size'> {
   label?: string
@@ -116,10 +117,56 @@ export interface TimeFieldProps {
   error?: boolean
   invalid?: boolean
   ariaLabel?: string
+  /** Minute interval (Settings → time interval). 1 = free typing; larger = hour and minute menus on that grid. */
+  step?: number
 }
 
-export function TimeField({ label, value, onChange, error, invalid, ariaLabel }: TimeFieldProps) {
-  return <Input type="time" numeric label={label} aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} error={error} invalid={invalid} className="[color-scheme:inherit]" />
+const two = (n: number): string => String(n).padStart(2, '0')
+const HOURS = Array.from({ length: 24 }, (_, i) => i)
+
+export function TimeField({ label, value, onChange, error, invalid, ariaLabel, step = 1 }: TimeFieldProps) {
+  const id = useId()
+  const minutes = minuteOptions(step)
+  if (minutes.length === 60)
+    return <Input type="time" numeric label={label} aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} error={error} invalid={invalid} className="[color-scheme:inherit]" />
+
+  const [h, m] = /^\d{1,2}:\d{2}$/.test(value) ? value.split(':').map(Number) : [NaN, NaN]
+  // A time off the grid (e.g. recorded by Wi-Fi at 08:07) stays visible and selectable until changed.
+  const mins = Number.isNaN(m) || minutes.includes(m) ? minutes : [...minutes, m].sort((a, b) => a - b)
+  const set = (hh: number, mm: number): void => onChange(`${two(hh)}:${two(mm)}`)
+  const sel = 'tnum cursor-default appearance-none bg-transparent text-center text-[13px] text-fg outline-none'
+  return (
+    <div className="flex flex-col gap-1.5">
+      {label && (
+        <label htmlFor={id} className="text-xs font-medium text-muted">
+          {label}
+        </label>
+      )}
+      <div
+        role="group"
+        aria-label={ariaLabel ?? label}
+        className={cx(
+          'no-drag flex h-8 items-center justify-center gap-0.5 rounded-md border bg-raised px-1.5 transition-colors',
+          'focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/25',
+          error || invalid ? 'border-danger' : 'border-line-strong'
+        )}
+      >
+        <select id={id} aria-label="Hour" value={Number.isNaN(h) ? '' : h} onChange={(e) => set(Number(e.target.value), Number.isNaN(m) ? minutes[0] : m)} className={cx(sel, 'w-7')}>
+          {Number.isNaN(h) && <option value="">--</option>}
+          {HOURS.map((x) => (
+            <option key={x} value={x}>{two(x)}</option>
+          ))}
+        </select>
+        <span className="text-[13px] text-faint">:</span>
+        <select aria-label="Minute" value={Number.isNaN(m) ? '' : m} onChange={(e) => set(Number.isNaN(h) ? 9 : h, Number(e.target.value))} className={cx(sel, 'w-7')}>
+          {Number.isNaN(m) && <option value="">--</option>}
+          {mins.map((x) => (
+            <option key={x} value={x}>{two(x)}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  )
 }
 
 const pad2 = (n: number): string => String(n).padStart(2, '0')

@@ -34,9 +34,18 @@ export function useSessionActions(onChanged: () => Promise<void> | void) {
         if (ok) toast.success('Session added', { description: label(d) })
         return ok
       },
-      async update(id: number, patch: Partial<Omit<Session, 'id'>>, quiet = false): Promise<boolean> {
+      /** With `prev` (the session before the change), the toast offers Undo. */
+      async update(id: number, patch: Partial<Omit<Session, 'id'>>, quiet = false, prev?: Session): Promise<boolean> {
         const ok = await run(() => window.api['sessions:update'](id, patch), "Couldn't save the session")
-        if (ok && !quiet) toast.success('Session updated', { id: `session-${id}` })
+        if (!ok) return ok
+        const back = prev
+          ? (Object.fromEntries(Object.keys(patch).map((k) => [k, prev[k as keyof Session]])) as Partial<Omit<Session, 'id'>>)
+          : null
+        const undo = back
+          ? [{ label: 'Undo', onClick: async () => void ((await run(() => window.api['sessions:update'](id, back), "Couldn't undo the change")) && toast.info('Change undone', { id: `session-${id}` })) }]
+          : undefined
+        if (!quiet) toast.success('Session updated', { id: `session-${id}`, description: prev ? label({ ...prev, ...patch }) : undefined, actions: undo })
+        else if (undo) toast.success('Project changed', { id: `session-${id}`, description: projectById(patch.projectId)?.name, actions: undo })
         return ok
       },
       async remove(s: Session): Promise<boolean> {

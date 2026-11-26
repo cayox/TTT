@@ -1,6 +1,7 @@
 import { Menu, Tray } from 'electron'
 import type { Project, Session } from '@shared/types'
 import { trayIcon } from './icon'
+import { formatClock } from '@shared/format'
 
 export interface TrayDeps {
   current: () => Session | null
@@ -8,6 +9,8 @@ export interface TrayDeps {
   /** Today's expected minutes; 0 on days off. */
   todayExpectedMin: () => number
   toggle: () => void
+  /** Planned clock-out time of the running session, epoch ms; null = none. */
+  plannedStop: () => number | null
   projects: () => Project[]
   /** Start on a project, or move the running session to it. */
   startOn: (projectId: number) => void
@@ -24,6 +27,7 @@ export function createTray(d: TrayDeps): { refresh: () => void } {
   const tray = new Tray(trayIcon({ progress: 0, running: false }))
   tray.setToolTip('TTT')
   let timer: NodeJS.Timeout | null = null
+  let timerEvery = 0
   let glyph = ''
   const refresh = (): void => {
     const cur = d.current()
@@ -50,14 +54,20 @@ export function createTray(d: TrayDeps): { refresh: () => void } {
             click: () => d.startOn(p.id)
           }))
         },
+        ...(() => {
+          const at = running ? d.plannedStop() : null
+          return at !== null ? [{ label: `Clocking out at ${formatClock(at)}`, enabled: false }] : []
+        })(),
         { label: `Today: ${fmtHM(ms)}${expected > 0 ? ` of ${fmtHM(expected * 60000)}` : ''}`, enabled: false },
         { type: 'separator' },
         { label: 'Open TTT', click: d.open },
         { label: 'Quit', click: d.quit }
       ])
     )
-    if (running && !timer) timer = setInterval(refresh, 1000)
-    if (!running && timer) (clearInterval(timer), (timer = null))
+    // Each second while running; once a minute when idle, so today's total resets after midnight.
+    const every = running ? 1000 : 60000
+    if (timer && timerEvery !== every) (clearInterval(timer), (timer = null))
+    if (!timer) (timer = setInterval(refresh, every)), (timerEvery = every)
   }
   // No click handler: a left click opens the menu, which is the only thing the icon should do.
   refresh()

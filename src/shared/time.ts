@@ -1,4 +1,9 @@
 import type { DayOverride, Schedule, Session, Settings } from './types'
+import { union, type Interval } from './intervals'
+import { breakDeduction, checkBreaks } from './breaks'
+
+/** What decides how a day's time counts. */
+export type CountSettings = Pick<Settings, 'creditKinds'> & { deductBreaks?: boolean }
 
 export type Range = '7d' | '30d' | '90d' | '1y' | 'all'
 
@@ -89,14 +94,25 @@ export function splitSessionsByDay(sessions: Session[], now: number): DaySegment
   return out
 }
 
-/** Minutes worked per local date (rounded to whole minutes per day). */
-export function workedMinutesByDay(sessions: Session[], now: number): Record<string, number> {
-  const ms: Record<string, number> = {}
-  for (const seg of splitSessionsByDay(sessions, now)) {
-    ms[seg.date] = (ms[seg.date] ?? 0) + (seg.endTs - seg.startTs)
-  }
+/** Each day's work as a union of intervals, so time covered by two overlapping sessions counts once. */
+export function workByDay(sessions: Session[], now: number): Record<string, Interval[]> {
+  const raw: Record<string, Interval[]> = {}
+  for (const seg of splitSessionsByDay(sessions, now)) (raw[seg.date] ??= []).push({ a: seg.startTs, b: seg.endTs })
+  const out: Record<string, Interval[]> = {}
+  for (const k of Object.keys(raw)) out[k] = union(raw[k])
+  return out
+}
+
+/**
+ * Minutes worked per local date (rounded to whole minutes per day). Overlaps count once; with
+ * deductBreaks a missed legal break is taken off (see breakDeduction).
+ */
+export function workedMinutesByDay(sessions: Session[], now: number, opts?: { deductBreaks?: boolean }): Record<string, number> {
   const out: Record<string, number> = {}
-  for (const k of Object.keys(ms)) out[k] = Math.round(ms[k] / 60000)
+  for (const [k, work] of Object.entries(workByDay(sessions, now))) {
+    const c = checkBreaks(work)
+    out[k] = Math.round(c.workedMin - (opts?.deductBreaks ? breakDeduction(c.workedMin, c.breakMin) : 0))
+  }
   return out
 }
 
@@ -141,7 +157,7 @@ export function rangeStats(
   sessions: Session[],
   schedule: Schedule,
   overrides: DayOverride[],
-  settings: Pick<Settings, 'creditKinds'>,
+  settings: CountSettings,
   now: number,
   firstStartTs: number | null
 ): RangeStats {
@@ -152,7 +168,7 @@ export function rangeStats(
   else if (firstStartTs == null) from = addDays(today, 1) // empty
   else from = dateKey(firstStartTs)
 
-  const worked = workedMinutesByDay(sessions, now)
+  const worked = workedMinutesByDay(sessions, now, settings)
   const ovMap = new Map(overrides.map((o) => [o.date, o]))
   const days: DayStat[] = []
   for (let d = from; d <= today; d = addDays(d, 1)) {
@@ -199,7 +215,7 @@ export function totalBalance(
   sessions: Session[],
   schedule: Schedule,
   overrides: DayOverride[],
-  settings: Pick<Settings, 'creditKinds'>,
+  settings: CountSettings,
   now: number,
   firstStartTs: number | null
 ): number {

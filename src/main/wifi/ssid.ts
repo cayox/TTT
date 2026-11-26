@@ -69,6 +69,11 @@ export function parseArpMac(out: string): string | null {
 export async function getCurrentNetwork(): Promise<CurrentNetwork> {
   const [ssid, route] = await Promise.all([getCurrentSsid(), run('route', ['-n', 'get', 'default'])])
   const gateway = route ? parseRouteGateway(route) : null
-  const arp = gateway ? await run('arp', ['-n', gateway]) : null
-  return { ssid, routerId: arp ? parseArpMac(arp) : null, gateway }
+  let routerId = gateway ? parseArpMac((await run('arp', ['-n', gateway])) ?? '') : null
+  // The ARP cache forgets idle entries; one ping puts the router back so it can be read.
+  if (gateway && !routerId) {
+    await run('ping', ['-c', '1', '-t', '1', gateway], 2500)
+    routerId = parseArpMac((await run('arp', ['-n', gateway])) ?? '')
+  }
+  return { ssid, routerId, gateway }
 }

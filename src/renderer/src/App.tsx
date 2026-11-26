@@ -8,6 +8,7 @@ import { TodayPage } from './pages/Today'
 import { HistoryPage } from './pages/History'
 import { StatsPage } from './pages/Stats'
 import { SettingsPage } from './pages/Settings'
+import { NAVIGATE } from './lib/nav'
 
 const PAGES: Record<NavId, () => React.JSX.Element> = {
   today: TodayPage,
@@ -21,10 +22,25 @@ function Root() {
   const { settings } = useTracker()
   const [active, setActive] = useState<NavId>('today')
   const [tour, setTour] = useState(false)
+  /** Bumped when all data was replaced, so every page mounts fresh. */
+  const [reload, setReload] = useState(0)
   useEffect(() => {
     const open = (): void => setTour(true)
     window.addEventListener(OPEN_ONBOARDING, open)
-    return () => window.removeEventListener(OPEN_ONBOARDING, open)
+    const go = (page: string): void => {
+      if (page in PAGES) setActive(page as NavId)
+    }
+    const onNav = (e: Event): void => go((e as CustomEvent<string>).detail)
+    window.addEventListener(NAVIGATE, onNav)
+    const off = window.events.onNavigate(go)
+    // An import replaced everything: start over from Today with fresh data.
+    const offD = window.events.onDataReplaced(() => setReload((n) => n + 1))
+    return () => {
+      window.removeEventListener(OPEN_ONBOARDING, open)
+      window.removeEventListener(NAVIGATE, onNav)
+      off()
+      offD()
+    }
   }, [])
 
   // Until settings arrive we cannot tell which one to show; an empty titlebar avoids a flash of the wrong one.
@@ -42,7 +58,7 @@ function Root() {
   return (
     <>
       <AppShell active={active} onNavigate={setActive}>
-        <Page key={active} />
+        <Page key={`${active}-${reload}`} />
       </AppShell>
       <UpdateDialog />
     </>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { Pause, PencilSimple, Play, Plus, Trash } from '@phosphor-icons/react'
-import { Badge, Button, IconButton, Page, ProgressRing, ProjectDot, ProjectSelect, Stat, cx, projectColor } from '../components/ui'
+import { CalendarX, House, Pause, PencilSimple, Play, Plus, Trash } from '@phosphor-icons/react'
+import { Badge, Button, IconButton, Page, ProgressRing, ProjectDot, ProjectSelect, Stat, TimeField, cx, projectColor } from '../components/ui'
 import { isTyping, useTracker } from '../lib/tracker'
 import { SessionEditor } from '../components/SessionEditor'
 import { errorText, useToast } from '../lib/toast'
@@ -19,6 +19,12 @@ import {
 } from '../../../shared/time'
 import { formatClock, formatDelta, formatDuration, formatDurationLong } from '../../../shared/format'
 import { flexNow, type MonthHours } from '../../../shared/hours'
+import { nextSlot } from '../../../shared/slots'
+import { unionLength } from '../../../shared/intervals'
+import { breakDeduction, checkBreaks, requiredBreak } from '../../../shared/breaks'
+import { breakIssueText } from '../../../shared/report'
+import { openDayInHistory } from '../lib/nav'
+import { resolveDefault } from '../lib/tracker'
 import type { Project } from '../../../shared/types'
 
 interface Data {
@@ -29,6 +35,8 @@ interface Data {
   settings: Settings
   balance: number
   month: MonthHours
+  /** Recent workdays with nothing tracked. */
+  missing: string[]
   fetchedAt: number
 }
 
@@ -38,16 +46,17 @@ async function load(): Promise<Data> {
   const now = Date.now()
   const today = dateKey(now)
   const from = addDays(today, -6)
-  const [current, sessions, schedule, overrides, settings, balance, month] = await Promise.all([
+  const [current, sessions, schedule, overrides, settings, balance, month, missing] = await Promise.all([
     window.api['sessions:current'](),
     window.api['sessions:list'](startOfDay(from), startOfDay(addDays(today, 1))),
     window.api['schedule:get'](),
     window.api['overrides:list'](from, today),
     window.api['settings:get'](),
     window.api['stats:balance'](),
-    window.api['stats:month']()
+    window.api['stats:month'](),
+    window.api['stats:missing']().catch(() => [] as string[])
   ])
-  return { current, sessions, schedule, overrides, settings, balance, month, fetchedAt: now }
+  return { current, sessions, schedule, overrides, settings, balance, month, missing, fetchedAt: now }
 }
 
 export function TodayPage() {
@@ -106,12 +115,19 @@ export function TodayPage() {
     const base = data.sessions.filter((s) => s.endTs !== null || s.id === current?.id)
     const sessions = current && !base.some((s) => s.id === current.id) ? [...base, current] : base
     const segs = splitSessionsByDay(sessions, now).filter((s) => s.date === today)
-    const workedMs = segs.reduce((a, s) => a + (s.endTs - s.startTs), 0)
+    const work = segs.map((x) => ({ a: x.startTs, b: x.endTs }))
+    // Time covered by two overlapping sessions counts once.
+    const workedMs = unionLength(work)
     const workedMin = workedMs / 60000
+    const breaks = checkBreaks(work)
+    const deducted = data.settings.deductBreaks ? breakDeduction(breaks.workedMin, breaks.breakMin) : 0
     const ov = data.overrides.find((o) => o.date === today)
     const { expectedMin, credited } = expectedMinutesForDay(today, data.schedule, ov, data.settings)
-    const effective = credited ? Math.max(workedMin, expectedMin) : workedMin
+    const counted = workedMin - deducted
+    const effective = credited ? Math.max(counted, expectedMin) : counted
     const remaining = expectedMin - effective
+    // Break still to take before you can leave: what the full day will require, less what you had.
+    const breakAhead = data.settings.breakRules && remaining > 0 && !credited ? Math.max(0, requiredBreak(workedMin + remaining) - breaks.breakMin) : 0
     const week = rangeStats('7d', sessions, data.schedule, data.overrides, data.settings, now, null).days
     const wIdx = (weekdayIndex(today) - data.settings.weekStart + 7) % 7
     const weekDays: DayStat[] = week.slice(week.length - 1 - wIdx)
@@ -119,20 +135,25 @@ export function TodayPage() {
       .filter((s) => (s.endTs ?? now) > todayStart && s.startTs < todayStart + 864e5)
       .sort((a, b) => a.startTs - b.startTs)
     const byProject = projectTotals(list, todayStart, todayStart + 864e5, now)
-    return { workedMs, workedMin, expectedMin, remaining, weekDays, list, ov, byProject }
+    return { workedMs, workedMin, expectedMin, remaining, weekDays, list, ov, byProject, breaks, deducted, breakAhead }
   }, [data, now, current])
 
   if (!data || !view) return <Skeleton />
 
   const running = !!current
-  const { workedMs, expectedMin, remaining, weekDays, list, ov, byProject } = view
-  const { projects, projectById, nextProjectId, chooseProject } = tracker
+  const { workedMs, expectedMin, remaining, weekDays, list, ov, byProject, breaks, deducted, breakAhead } = view
+  const { projects, projectById, nextProjectId, chooseProject, suggestedProjectId } = tracker
+  const usual = !current && suggestedProjectId !== null && suggestedProjectId === nextProjectId && suggestedProjectId !== resolveDefault(projects, data.settings)
   const over = remaining <= 0 && expectedMin > 0
   const noTarget = expectedMin === 0
   const secs = Math.floor(workedMs / 1000)
   const clock = `${Math.floor(secs / 3600)}:${String(Math.floor((secs % 3600) / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`
   const progress = expectedMin > 0 ? view.workedMin / expectedMin : 0
-  const finish = running && remaining > 0 ? formatClock(now + remaining * 60000) : null
+  // With the break rules on, the finish time leaves room for the break that is still due.
+  const finishAt = remaining > 0 ? now + (remaining + breakAhead) * 60000 : null
+  const finish = finishAt !== null && (running || list.length > 0) ? formatClock(finishAt) : null
+  const finishHint = [!running && 'if you start now', breakAhead > 0 && `incl. ${Math.round(breakAhead)} min break`].filter(Boolean).join(', ') || undefined
+  const issue = data.settings.breakRules ? breakIssueText(breaks) : null
   const balance = data.balance
   const dayLabel = new Date(now).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
 
@@ -181,6 +202,8 @@ export function TodayPage() {
               onChange={(id) => id !== null && void chooseProject(id)}
             />
           </div>
+          {usual && <p className="-mt-2 text-[11px] text-muted">Your usual project at this time</p>}
+          {current && <ClockOut startTs={current.startTs} />}
           <p className="text-[11px] text-faint">
             <kbd>Space</kbd> or <kbd>⌘↩</kbd> to {running ? 'pause' : 'start'}
           </p>
@@ -188,11 +211,29 @@ export function TodayPage() {
 
         <div className="flex max-w-md flex-col gap-7">
           <div>
-            <p className={cx('font-display text-[34px] font-semibold leading-tight tracking-tight text-balance', over && 'text-over')}>{status}</p>
+            <p aria-live="polite" className={cx('font-display text-[34px] font-semibold leading-tight tracking-tight text-balance', over && 'text-over')}>{status}</p>
             <p className="mt-2 text-sm text-muted">{detail}</p>
           </div>
           <div className="flex flex-wrap gap-x-10 gap-y-5">
-            {finish && <Stat size="sm" label="Finish around" value={finish} />}
+            {finish && <Stat size="sm" label="Finish around" value={finish} hint={finishHint} />}
+            {data.settings.breakRules && view.workedMin > 0 && (
+              <Stat
+                size="sm"
+                label="Breaks"
+                value={formatDuration(breaks.breakMin)}
+                valueTone={issue ? 'under' : 'neutral'}
+                hint={
+                  issue ??
+                  (deducted > 0
+                    ? `${Math.round(deducted)} min deducted`
+                    : breaks.requiredMin > 0
+                      ? `${breaks.requiredMin} min required, done`
+                      : breakAhead > 0
+                        ? `${Math.round(breakAhead)} min still due today`
+                        : 'Counted from 15 min')
+                }
+              />
+            )}
             <Stat
               size="sm"
               label="Balance"
@@ -204,6 +245,8 @@ export function TodayPage() {
           </div>
         </div>
       </section>
+
+      {data.missing.length > 0 && <MissingDays dates={data.missing} />}
 
       <ProjectsSection
         today={byProject}
@@ -218,6 +261,89 @@ export function TodayPage() {
 
       <WeekStrip days={weekDays} weekStart={data.settings.weekStart} />
     </Page>
+  )
+}
+
+function tsToday(hhmm: string, now: number): number {
+  const [h, m] = hhmm.split(':').map(Number)
+  const d = new Date(now)
+  d.setHours(h, m, 0, 0)
+  return d.getTime()
+}
+
+/**
+ * Clock out ahead of time ("I leave at 17:00") so it is not forgotten on the way out, or a little
+ * after the fact. A time still to come is scheduled; a past one ends the session right away.
+ */
+function ClockOut({ startTs }: { startTs: number }) {
+  const { plannedStop, stopAt, cancelPlannedStop, settings, now } = useTracker()
+  const step = settings?.timeStep ?? 15
+  const [draft, setDraft] = useState<string | null>(null)
+
+  if (draft === null) {
+    if (plannedStop !== null)
+      return (
+        <div className="flex items-center gap-2 text-[13px]">
+          <House size={14} className="text-accent" />
+          <span>
+            Clocking out at <span className="tnum font-medium">{formatClock(plannedStop)}</span>
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setDraft(formatClock(plannedStop))}>Change</Button>
+          <Button variant="ghost" size="sm" onClick={() => void cancelPlannedStop()}>Cancel</Button>
+        </div>
+      )
+    return (
+      <Button variant="ghost" size="sm" icon={<House size={14} />} onClick={() => setDraft(formatClock(nextSlot(now, step)))}>
+        Clock out at…
+      </Button>
+    )
+  }
+
+  const at = tsToday(draft, now)
+  const tooEarly = at <= startTs
+  const past = at <= now
+  return (
+    <form
+      className="flex items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (tooEarly) return
+        void stopAt(at).then(() => setDraft(null))
+      }}
+      onKeyDown={(e) => e.key === 'Escape' && setDraft(null)}
+    >
+      <div className="w-[5.5rem]">
+        <TimeField ariaLabel="Clock-out time" value={draft} onChange={setDraft} step={step} invalid={tooEarly} />
+      </div>
+      <Button type="submit" variant="primary" size="sm" disabled={tooEarly} title={tooEarly ? 'Before the session started' : undefined}>
+        {past ? 'Clock out now' : `Clock out at ${draft}`}
+      </Button>
+      <Button variant="ghost" size="sm" onClick={() => setDraft(null)}>Cancel</Button>
+    </form>
+  )
+}
+
+const fmtShort = (date: string): string => new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+
+/** Past workdays with nothing tracked and no day off: one click opens the day in History. */
+function MissingDays({ dates }: { dates: string[] }) {
+  const shown = dates.slice(-6)
+  return (
+    <section role="status" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-line bg-sunken/60 px-4 py-3 text-[13px]">
+      <CalendarX size={16} className="shrink-0 text-under" aria-hidden />
+      <span className="font-medium">
+        {dates.length} {dates.length === 1 ? 'workday has' : 'workdays have'} no entries
+      </span>
+      <span className="text-muted">Add the time you worked, or mark the day off.</span>
+      <span className="flex flex-wrap gap-1.5 md:ml-auto">
+        {dates.length > shown.length && <span className="self-center text-xs text-faint">{dates.length - shown.length} more, </span>}
+        {shown.map((d) => (
+          <Button key={d} size="sm" variant="secondary" onClick={() => openDayInHistory(d)}>
+            {fmtShort(d)}
+          </Button>
+        ))}
+      </span>
+    </section>
   )
 }
 
@@ -243,6 +369,14 @@ function MonthStat({ hours, liveMin, name }: { hours: MonthHours; liveMin: numbe
   if (done) hint = counted > hours.contractMin ? `Done, ${formatDuration(counted - hours.contractMin)} extra` : 'Done'
   else if (hours.workdaysLeft > 0) hint = `${formatDuration(remaining / hours.workdaysLeft)} per workday left`
   else hint = `${formatDuration(remaining)} left, no workdays left`
+  // At the pace of this month so far.
+  const pace = done
+    ? null
+    : hours.projectedFinish
+      ? `On pace to finish ${new Date(`${hours.projectedFinish}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`
+      : hours.projectedShortMin > 1
+        ? `At this pace ${formatDuration(hours.projectedShortMin)} short`
+        : null
   return (
     <Stat
       size="sm"
@@ -254,7 +388,7 @@ function MonthStat({ hours, liveMin, name }: { hours: MonthHours; liveMin: numbe
           <span className="font-sans text-xs font-normal tracking-normal text-faint"> of {formatDuration(hours.contractMin)}</span>
         </span>
       }
-      hint={hint}
+      hint={pace ? `${hint}. ${pace}` : hint}
     />
   )
 }
@@ -470,7 +604,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
                   initial={s}
                   onCancel={() => setEditing(null)}
                   onSave={async (d) => {
-                    if (await act.update(s.id, d)) setEditing(null)
+                    if (await act.update(s.id, d, false, s)) setEditing(null)
                   }}
                 />
               </li>
@@ -491,7 +625,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
                   ariaLabel={`Project for the session starting ${formatClock(s.startTs)}`}
                   projects={projects}
                   value={s.projectId}
-                  onChange={(id) => void act.update(s.id, { projectId: id }, true)}
+                  onChange={(id) => void act.update(s.id, { projectId: id }, true, s)}
                 />
                 {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
                 <span className="tnum w-12 shrink-0 text-right text-muted">{formatDuration(((s.endTs ?? now) - s.startTs) / 60000)}</span>
