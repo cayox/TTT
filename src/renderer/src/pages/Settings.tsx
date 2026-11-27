@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Archive, ArrowCounterClockwise, Clock, Database, FolderSimple, Plus, SlidersHorizontal, Star, Trash, WifiHigh, X } from '@phosphor-icons/react'
+import { Archive, ArrowCounterClockwise, CaretUpDown, Clock, Database, FolderSimple, MapPin, Plus, SlidersHorizontal, Star, Trash, WifiHigh, X } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 import { Badge, Button, Card, ColorPicker, DurationField, IconButton, Input, Modal, NumberField, Page, ProjectDot, ProjectLabel, ProjectSelect, Segmented, Toggle, cx } from '../components/ui'
 import { WeekEditor } from '../components/WeekEditor'
@@ -15,8 +15,9 @@ import { compareVersions } from '../../../shared/version'
 import type { ChangelogEntry } from '../../../shared/changelog'
 import type { Theme } from '../lib/theme'
 import { DEFAULT_SCHEDULE, DEFAULT_SETTINGS } from '../../../shared/types'
-import { EXPORT_ROUNDING, GLOBAL_SHORTCUTS, PROJECT_COLORS, TIME_STEPS } from '../../../shared/types'
-import type { BackupInfo, CurrentNetwork, DayKind, LocationStatus, NotificationSettings, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
+import { EXPORT_ROUNDING, GLOBAL_SHORTCUTS, PLACE_RADII, PROJECT_COLORS, TIME_STEPS } from '../../../shared/types'
+import { distanceM, MAX_FIX_ACCURACY_M } from '../../../shared/places'
+import type { BackupInfo, CurrentNetwork, DayKind, LocationFix, LocationStatus, NotificationSettings, Project, ProjectColor, Schedule, Settings } from '../../../shared/types'
 import { formatDurationLong } from '../../../shared/format'
 
 const CREDIT: { kind: DayKind; label: string }[] = [
@@ -39,12 +40,37 @@ function needsLocation(s: LocationStatus | null): boolean {
 }
 
 const norm = (x: string): string => x.trim().toLowerCase()
+
+const radiusLabel = (m: number): string => (m >= 1000 ? `${m / 1000} km` : `${m} m`)
+/** "120 m away", "3.4 km away" */
+const awayLabel = (m: number): string => (m < 1000 ? `${Math.round(m / 10) * 10} m away` : `${(m / 1000).toFixed(m < 10000 ? 1 : 0)} km away`)
+/** Work network and work place names share the project map, so they must not collide. */
+const nameTaken = (name: string, s: Settings): boolean =>
+  s.workSsids.some((w) => norm(w) === norm(name)) || s.workPlaces.some((p) => norm(p.name) === norm(name))
 /** Mirrors the main-process watcher: SSID first, router as fallback. */
 function isCurrent(name: string, settings: Settings, net: CurrentNetwork | null): boolean {
   if (!net) return false
   if (net.ssid && norm(net.ssid) === norm(name)) return true
   const r = settings.networkRouters[name]
   return !!r && !!net.routerId && r.toLowerCase() === net.routerId.toLowerCase()
+}
+
+/** Native select styled like ProjectSelect's inline variant: "within 250 m". */
+function RadiusSelect({ value, onChange, ariaLabel }: { value: number; onChange: (m: number) => void; ariaLabel: string }) {
+  const options = [...new Set<number>([...PLACE_RADII, value])].sort((a, b) => a - b)
+  return (
+    <div className="no-drag relative flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-xs text-muted hover:bg-sunken focus-within:ring-2 focus-within:ring-accent/40">
+      <span className="tnum">within {radiusLabel(value)}</span>
+      <CaretUpDown size={11} className="text-faint" />
+      <select aria-label={ariaLabel} value={value} onChange={(e) => onChange(Number(e.target.value))} className="absolute inset-0 cursor-default opacity-0">
+        {options.map((r) => (
+          <option key={r} value={r}>
+            {radiusLabel(r)}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
 }
 
 function Section({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
@@ -540,6 +566,24 @@ export function SettingsPage() {
   // macOS hides Wi-Fi names from apps without Location access, so auto-tracking depends on it.
   const [loc, setLoc] = useState<LocationStatus | null>(null)
   const [asking, setAsking] = useState(false)
+  // Work places
+  const [placeDraft, setPlaceDraft] = useState('')
+  const [locating, setLocating] = useState(false)
+  const [fix, setFix] = useState<LocationFix | null>(null)
+  const hasPlaces = settings.workPlaces.length > 0
+
+  // Where you are, for the "Here" and distance labels; only while places exist and access is granted.
+  useEffect(() => {
+    if (!hasPlaces || loc !== 'granted') return
+    let live = true
+    const poll = (): void => void window.api['wifi:location']().then((f) => live && f && setFix(f), () => undefined)
+    poll()
+    const iv = setInterval(poll, 60000)
+    return () => {
+      live = false
+      clearInterval(iv)
+    }
+  }, [hasPlaces, loc])
 
   useEffect(() => {
     let live = true
@@ -558,6 +602,10 @@ export function SettingsPage() {
   const addNetwork = (name: string, routerId?: string | null): void => {
     const n = name.trim()
     if (!n) return
+    if (settings.workPlaces.some((p) => norm(p.name) === norm(n))) {
+      toast.error(`${n} is already a work place`, { id: 'wifi', description: 'Give the network a different name.' })
+      return
+    }
     const workSsids = settings.workSsids.includes(n) ? settings.workSsids : [...settings.workSsids, n]
     patch({ workSsids, ...(routerId ? { networkRouters: { ...settings.networkRouters, [n]: routerId } } : {}) })
     setDraft('')
@@ -577,6 +625,48 @@ export function SettingsPage() {
     patch({ workSsids: settings.workSsids.filter((x) => x !== name), ssidProjects, networkRouters })
     toast.success(`${name} removed`, { id: 'wifi', actions: [{ label: 'Undo', onClick: () => patch(before) }] })
   }
+  const addPlace = async (): Promise<void> => {
+    const n = placeDraft.trim()
+    if (!n) return
+    if (nameTaken(n, settings)) {
+      toast.error(`${n} is already in use`, { id: 'place', description: 'Work networks and places each need their own name.' })
+      return
+    }
+    let status = loc
+    if (status !== 'granted') status = await askLocation()
+    if (status !== 'granted') return
+    setLocating(true)
+    const f = await window.api['wifi:location']().catch(() => null)
+    setLocating(false)
+    if (!f) {
+      toast.warning("Couldn't find your location", { id: 'place', description: 'Make sure Wi-Fi is on; macOS locates a Mac from nearby networks. Then try again.' })
+      return
+    }
+    if (f.accuracy > MAX_FIX_ACCURACY_M) {
+      toast.warning('Your location is too vague right now', { id: 'place', description: `macOS only knows it within ${radiusLabel(Math.round(f.accuracy))}. Try again with Wi-Fi on.` })
+      return
+    }
+    setFix(f)
+    // Start with a radius that comfortably covers how precisely macOS knows where you are.
+    const radius = PLACE_RADII.find((r) => r >= f.accuracy * 2) ?? PLACE_RADII[PLACE_RADII.length - 1]
+    patch({ workPlaces: [...settings.workPlaces, { name: n, lat: f.lat, lon: f.lon, radius }] })
+    setPlaceDraft('')
+    toast.success(`${n} added`, { id: 'place', description: `Tracking runs within ${radiusLabel(radius)} of where you are now.` })
+  }
+  const removePlace = (name: string): void => {
+    const ssidProjects = { ...settings.ssidProjects }
+    delete ssidProjects[name]
+    const before = { workPlaces: settings.workPlaces, ssidProjects: settings.ssidProjects }
+    patch({ workPlaces: settings.workPlaces.filter((p) => p.name !== name), ssidProjects })
+    toast.success(`${name} removed`, { id: 'place', actions: [{ label: 'Undo', onClick: () => patch(before) }] })
+  }
+  const setPlaceProject = (name: string, id: number | null): void => {
+    const next = { ...settings.ssidProjects }
+    if (id === null) delete next[name]
+    else next[name] = id
+    patch({ ssidProjects: next })
+  }
+
   /** Shows the macOS prompt when the user has not answered it yet; opens System Settings once they said no. */
   const askLocation = async (): Promise<LocationStatus | null> => {
     if (loc === 'denied' || loc === 'restricted') {
@@ -595,6 +685,12 @@ export function SettingsPage() {
     if (s === 'granted') toast.success('Location access granted', { id: 'wifi-location', description: 'TTT can read Wi-Fi names now.' })
     else if (s === 'denied' || s === 'restricted')
       toast.warning('Location access denied', { id: 'wifi-location', description: 'TTT can still recognize a network by its router instead.' })
+    else
+      toast.info('macOS did not show the prompt', {
+        id: 'wifi-location',
+        description: 'Switch TTT on in System Settings → Privacy & Security → Location Services instead.',
+        actions: [{ label: 'Open System Settings', onClick: () => void window.api['wifi:openLocationSettings']() }]
+      })
     return s
   }
 
@@ -825,7 +921,7 @@ export function SettingsPage() {
   }
 
   const auto = (
-    <Section title="Automatic tracking" description="Start and stop the timer with the Wi-Fi network you are on. You can always start and pause by hand.">
+    <Section title="Automatic tracking" description="Start and stop the timer by the Wi-Fi network you are on or the place you are at. You can always start and pause by hand.">
       <div className="px-4 py-3.5">
         <Toggle
           checked={settings.autoTrack}
@@ -835,7 +931,7 @@ export function SettingsPage() {
             if (v && loc === 'notDetermined') void askLocation()
           }}
           label="Track automatically"
-          description="Runs while connected to a work network."
+          description="Runs while you are on a work network or at a work place."
         />
       </div>
       {needsLocation(loc) && (
@@ -843,8 +939,8 @@ export function SettingsPage() {
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-medium">Location access {loc === 'notDetermined' ? 'needed' : 'is off'}</div>
             <p className="mt-0.5 text-xs text-muted">
-              macOS only reveals Wi-Fi names to apps with Location access. Without it TTT recognizes a network by its router instead, which
-              works but cannot show the name.
+              macOS only reveals Wi-Fi names and where you are to apps with Location access. Without it TTT recognizes a network by its router
+              instead, which works but cannot show the name, and work places cannot work.
             </p>
           </div>
           <Button type="button" variant="secondary" size="sm" onClick={() => void askLocation()} disabled={asking}>
@@ -929,7 +1025,61 @@ export function SettingsPage() {
           )}
         </form>
       </div>
-      <Row title="Grace period" description="Wait this long after leaving the network before stopping.">
+      <div className="px-4 py-3.5">
+        <div className="mb-0.5 text-[13px] font-medium">Work places</div>
+        <p className="mb-2.5 text-xs text-muted">
+          For when the Wi-Fi alone does not say where you are, like a client site or a shared office. A work network takes precedence.
+        </p>
+        {hasPlaces && (
+          <ul className="mb-3 flex flex-col divide-y divide-line rounded-md border border-line">
+            {settings.workPlaces.map((p) => {
+              const d = fix ? distanceM(p, fix) : null
+              const here = d !== null && d <= p.radius
+              return (
+                <li key={p.name} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-1.5 pl-3 pr-1.5 text-[13px]">
+                  <MapPin size={14} className={cx('shrink-0', here ? 'text-over' : 'text-accent')} />
+                  <span className="flex min-w-24 flex-1 items-center gap-2">
+                    <span className="truncate">{p.name}</span>
+                    {here ? <Badge tone="over">Here</Badge> : d !== null && <span className="shrink-0 text-[11px] text-faint">{awayLabel(d)}</span>}
+                  </span>
+                  <RadiusSelect
+                    ariaLabel={`Radius around ${p.name}`}
+                    value={p.radius}
+                    onChange={(r) => patch({ workPlaces: settings.workPlaces.map((x) => (x.name === p.name ? { ...x, radius: r } : x)) })}
+                  />
+                  <span className="text-xs text-faint">tracks to</span>
+                  <ProjectSelect
+                    className="w-44"
+                    ariaLabel={`Project for sessions at ${p.name}`}
+                    projects={projects}
+                    noneLabel="Default project"
+                    value={settings.ssidProjects[p.name] ?? null}
+                    onChange={(id) => setPlaceProject(p.name, id)}
+                  />
+                  <IconButton size="sm" label={`Remove ${p.name}`} onClick={() => removePlace(p.name)}>
+                    <X size={12} />
+                  </IconButton>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void addPlace()
+          }}
+        >
+          <div className="w-56">
+            <Input aria-label="Place name" placeholder="Name this place, e.g. Client office" value={placeDraft} onChange={(e) => setPlaceDraft(e.target.value)} />
+          </div>
+          <Button type="submit" variant="secondary" size="sm" disabled={!placeDraft.trim() || locating || asking}>
+            {locating ? 'Locating…' : 'Add where I am now'}
+          </Button>
+        </form>
+      </div>
+      <Row title="Grace period" description="Wait this long after leaving the network or place before stopping.">
         <div className="w-36">
           <NumberField label="" value={settings.graceMinutes} onChange={(v) => patch({ graceMinutes: v })} min={0} max={120} step={1} precision={0} suffix="min" />
         </div>

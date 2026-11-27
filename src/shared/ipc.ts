@@ -1,4 +1,4 @@
-import type { BackupInfo, CurrentNetwork, DayOverride, LocationStatus, UpdateState, Project, ProjectColor, Schedule, Session, SessionSource, Settings } from './types'
+import type { BackupInfo, CurrentNetwork, DayOverride, LocationFix, LocationStatus, UpdateState, Project, ProjectColor, Schedule, Session, SessionSource, Settings } from './types'
 import type { ProjectTotal, Range, RangeStats } from './time'
 import type { MonthHours, MonthTotal } from './hours'
 import type { ChangelogEntry } from './changelog'
@@ -62,6 +62,8 @@ export interface IpcContract {
   'wifi:requestLocation': [[], LocationStatus]
   /** Opens System Settings at Location Services, for when access was denied. */
   'wifi:openLocationSettings': [[], void]
+  /** A fresh location fix, for saving a work place; null without access or a fix. */
+  'wifi:location': [[], LocationFix | null]
 
   /** Month timesheet as PDF via a save dialog; returns the saved path, or null if cancelled. month is 0-based. */
   'export:pdf': [[year: number, month: number], string | null]
@@ -132,7 +134,7 @@ export const CHANNELS: Channel[] = [
   'schedule:get', 'schedule:set',
   'overrides:list', 'overrides:set', 'overrides:remove',
   'projects:list', 'projects:add', 'projects:update', 'projects:remove', 'projects:usage',
-  'wifi:current', 'wifi:locationStatus', 'wifi:requestLocation', 'wifi:openLocationSettings',
+  'wifi:current', 'wifi:locationStatus', 'wifi:requestLocation', 'wifi:openLocationSettings', 'wifi:location',
   'export:pdf', 'export:copyText', 'export:openWhatsapp', 'export:csv', 'export:ics', 'export:openLast', 'export:revealLast', 'export:shareLast',
   'update:state', 'update:check', 'update:download', 'update:install', 'update:skip', 'update:dismiss', 'update:openRelease',
   'data:exportJson', 'data:exportCsv', 'data:import', 'data:backups', 'data:backupNow', 'data:openBackups', 'data:restore',

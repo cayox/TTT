@@ -7,6 +7,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [0.4.0-beta.1] - 2026-11-27
+
+### Added
+
+- Work places: automatic tracking by where you are, not only by Wi-Fi. In Settings → Automatic tracking, name a place and choose **Add where I am now**, then pick its radius and project. A work network still wins when both match.
+
+### Changed
+
+- Sessions started automatically are labeled **Auto** instead of **Wi-Fi**.
+
+### Fixed
+
+- **Allow location access** now shows the macOS prompt. Before, it could stay on "Waiting…" without macOS ever asking. If macOS still shows no prompt, TTT now offers to open System Settings instead. After this update, macOS may ask for Location access once more.
+
 ## [0.3.0-beta.1] - 2026-11-26
 
 ### Added

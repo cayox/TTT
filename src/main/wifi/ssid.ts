@@ -21,20 +21,39 @@ export function parseNetworksetup(out: string): string | null {
   return s && s !== '<redacted>' ? s : null
 }
 
+const HELPER_APP = 'TTT Location.app'
+const HELPER_BIN = join(HELPER_APP, 'Contents', 'MacOS', 'ssid-helper')
+
 /**
- * Optional CoreWLAN helper (see helper/ssid.swift): TTT_SSID_HELPER, the packaged app's resources,
- * or build/ssid-helper so `npm run dev` uses the same binary.
+ * Optional CoreWLAN helper app (see helper/ssid.swift): TTT_SSID_HELPER, the packaged app's
+ * resources, or build/ so `npm run dev` uses the same bundle.
  */
 export function helperPath(): string | null {
   const candidates = [
     process.env.TTT_SSID_HELPER,
-    join(process.resourcesPath ?? '', 'ssid-helper'),
-    join(process.cwd(), 'build', 'ssid-helper')
+    join(process.resourcesPath ?? '', HELPER_BIN),
+    join(process.cwd(), 'build', HELPER_BIN)
   ]
   return candidates.find((p): p is string => !!p && existsSync(p)) ?? null
 }
 
-/** Runs the helper; null when it is not bundled or it failed. */
+/** The innermost .app bundle around an executable: "…/TTT.app/…/TTT Location.app/Contents/MacOS/x" -> "…/TTT Location.app". */
+export function bundleOf(executable: string): string | null {
+  const i = executable.lastIndexOf('.app/')
+  return i >= 0 ? executable.slice(0, i + 4) : null
+}
+
+/** The helper's app bundle, for registering and launching it through Launch Services. */
+export function helperBundle(): string | null {
+  const p = helperPath()
+  return p ? bundleOf(p) : null
+}
+
+/**
+ * Runs the helper; null when it is not bundled or it failed. Run directly rather than through `open`:
+ * the Location prompt only appears that way, and `open -W` loses track of a process this short-lived.
+ * macOS still knows it as its own app as long as Launch Services has it registered (location.ts).
+ */
 export async function runHelper(args: string[], timeout?: number): Promise<string | null> {
   const p = helperPath()
   return p ? ((await run(p, args, timeout))?.trim() ?? null) || null : null

@@ -31,6 +31,26 @@ export interface CurrentNetwork {
 }
 
 /** macOS Location authorization for TTT; 'unknown' when it cannot be read (no helper, or not macOS). */
+/** A location fix from macOS (derived from nearby Wi-Fi on a Mac). */
+export interface LocationFix {
+  lat: number
+  lon: number
+  /** Radius of uncertainty in meters. */
+  accuracy: number
+}
+
+/** A place where auto-tracking runs, matched by location instead of by network. */
+export interface WorkPlace {
+  name: string
+  lat: number
+  lon: number
+  /** Meters around the point that count as being there. */
+  radius: number
+}
+
+/** Radii offered for a work place, in meters. */
+export const PLACE_RADII = [100, 250, 500, 1000] as const
+
 export type LocationStatus = 'granted' | 'denied' | 'restricted' | 'notDetermined' | 'unknown'
 
 /** A release on GitHub that is newer than the running app. */
@@ -93,7 +113,9 @@ export interface Settings {
   defaultProjectId: number | null
   /** Work network name -> router MAC, to recognize it when macOS hides the SSID. */
   networkRouters: Record<string, string>
-  /** Work SSID -> project for Wi-Fi started sessions; missing = default project. */
+  /** Work places matched by location, for when the Wi-Fi alone does not tell where you are. */
+  workPlaces: WorkPlace[]
+  /** Work network or work place name -> project for auto-started sessions; missing = default project. */
   ssidProjects: Record<string, number>
   /** Overtime (+) or undertime (−) in minutes carried over from before tracking; added to the running balance. */
   startingBalance: number
@@ -165,6 +187,7 @@ export const DEFAULT_SETTINGS: Settings = {
   creditKinds: ['vacation', 'sick', 'holiday'],
   defaultProjectId: null,
   networkRouters: {},
+  workPlaces: [],
   ssidProjects: {},
   startingBalance: 0,
   exportName: '',

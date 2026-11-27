@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createWifiWatcher, matchWorkNetwork } from './watcher'
-import { parseArpMac, parseRouteGateway } from './ssid'
+import { createWifiWatcher, distanceM, matchWorkNetwork, matchWorkPlace } from './watcher'
+import { bundleOf, parseArpMac, parseRouteGateway } from './ssid'
+import { parseFix } from './location'
 
 function setup(grace = 5, opts: { wifiSession?: boolean; routers?: Record<string, string> } = {}) {
   let t = 1_000_000
@@ -103,5 +104,75 @@ describe('network matching', () => {
     expect(parseArpMac('? (192.168.178.1) at 60:b5:8d:96:36:fa on en0 ifscope [ethernet]')).toBe('60:b5:8d:96:36:fa')
     expect(parseArpMac('? (10.0.0.1) at 0:1b:2:aa:b:c on en0')).toBe('00:1b:02:aa:0b:0c')
     expect(parseArpMac('? (10.0.0.1) at (incomplete) on en0')).toBeNull()
+  })
+})
+
+describe('work places', () => {
+  const office = { name: 'Office', lat: 52.52, lon: 13.405, radius: 250 }
+  const client = { name: 'Client', lat: 52.53, lon: 13.405, radius: 250 }
+  // ~111 m per 0.001° latitude
+  const at = (lat: number, lon = 13.405, accuracy = 50) => ({ lat, lon, accuracy })
+
+  it('measures distance in meters', () => {
+    expect(distanceM({ lat: 52.52, lon: 13.405 }, { lat: 52.521, lon: 13.405 })).toBeCloseTo(111, 0)
+  })
+  it('matches inside the radius, picks the nearest, ignores vague fixes', () => {
+    expect(matchWorkPlace([office, client], at(52.5201))).toBe('Office')
+    expect(matchWorkPlace([office, client], at(52.5299))).toBe('Client')
+    expect(matchWorkPlace([office, client], at(52.525))).toBeNull()
+    expect(matchWorkPlace([office], at(52.5201, 13.405, 5000))).toBeNull()
+    expect(matchWorkPlace([office], null)).toBeNull()
+    expect(matchWorkPlace([], at(52.52))).toBeNull()
+  })
+
+  function placeSetup() {
+    let t = 1_000_000
+    let fix: { lat: number; lon: number; accuracy: number } | null = null
+    let ssid: string | null = null
+    let running = false
+    const getLocation = vi.fn(async () => fix)
+    const onStart = vi.fn(() => { running = true })
+    const onStop = vi.fn(() => { running = false })
+    const w = createWifiWatcher({
+      getNetwork: async () => ({ ssid, routerId: null }),
+      getLocation,
+      getSettings: () => ({ workSsids: ['HQ'], networkRouters: {}, workPlaces: [office], graceMinutes: 5, autoTrack: true }),
+      now: () => t, onStart, onStop, isRunning: () => running
+    })
+    return { w, onStart, onStop, getLocation, setFix: (f: typeof fix) => (fix = f), setSsid: (s: string | null) => (ssid = s), adv: (m: number) => (t += m * 60000), time: () => t }
+  }
+
+  it('starts at a place and stops after leaving it for the grace period', async () => {
+    const s = placeSetup()
+    s.setFix(at(52.5201)); await s.w.tick()
+    expect(s.onStart).toHaveBeenCalledWith('Office')
+    const seen = s.time()
+    s.setFix(at(52.54)); s.adv(3); await s.w.tick(); expect(s.onStop).not.toHaveBeenCalled()
+    s.adv(3); await s.w.tick(); expect(s.onStop).toHaveBeenCalledWith(seen)
+  })
+  it('prefers a work network and skips the location then', async () => {
+    const s = placeSetup()
+    s.setSsid('HQ'); s.setFix(at(52.5201)); await s.w.tick()
+    expect(s.onStart).toHaveBeenCalledWith('HQ')
+    expect(s.getLocation).not.toHaveBeenCalled()
+  })
+})
+
+describe('location fix parsing', () => {
+  it('reads the helper line and rejects junk', () => {
+    expect(parseFix('52.520000 13.405000 65\n')).toEqual({ lat: 52.52, lon: 13.405, accuracy: 65 })
+    expect(parseFix(null)).toBeNull()
+    expect(parseFix('')).toBeNull()
+    expect(parseFix('91 0 10')).toBeNull()
+    expect(parseFix('nope')).toBeNull()
+  })
+})
+
+describe('helper bundle', () => {
+  it('is the innermost app, not TTT itself', () => {
+    expect(bundleOf('/Applications/TTT.app/Contents/Resources/TTT Location.app/Contents/MacOS/ssid-helper')).toBe(
+      '/Applications/TTT.app/Contents/Resources/TTT Location.app'
+    )
+    expect(bundleOf('/usr/local/bin/ssid-helper')).toBeNull()
   })
 })

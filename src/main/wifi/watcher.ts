@@ -1,5 +1,12 @@
+import type { LocationFix, WorkPlace } from '@shared/types'
+import { matchWorkPlace } from '@shared/places'
+
+export { distanceM, matchWorkPlace } from '@shared/places'
+
 export interface WifiSettings {
   workSsids: string[]
+  /** Places matched by location; checked when no work network matches. */
+  workPlaces?: WorkPlace[]
   /** name -> router MAC; matches when the SSID is hidden */
   networkRouters: Record<string, string>
   graceMinutes: number
@@ -8,9 +15,11 @@ export interface WifiSettings {
 
 export interface WifiWatcherOpts {
   getNetwork: () => Promise<{ ssid: string | null; routerId: string | null }>
+  /** Current location, only asked for when work places are set and no work network matches. */
+  getLocation?: () => Promise<LocationFix | null>
   getSettings: () => WifiSettings
   now: () => number
-  /** Called with the matched work network name so the session can go to its project. */
+  /** Called with the matched work network or place name so the session can go to its project. */
   onStart: (name: string) => void
   onStop: (endTs: number) => void
   isRunning: () => boolean
@@ -60,7 +69,8 @@ export function createWifiWatcher(o: WifiWatcherOpts) {
       const grace = Math.max(cfg.graceMinutes * 60000, MIN_GRACE_MS)
       const net = await o.getNetwork()
       const t = o.now()
-      const match = matchWorkNetwork(cfg, net)
+      const netMatch = matchWorkNetwork(cfg, net)
+      const match = netMatch ?? (cfg.workPlaces?.length && o.getLocation ? matchWorkPlace(cfg.workPlaces, await o.getLocation()) : null)
       const onWork = match !== null
       let running = o.isRunning()
       if (!running) startedByWatcher = false
@@ -82,8 +92,8 @@ export function createWifiWatcher(o: WifiWatcherOpts) {
         running = o.isRunning()
       }
 
-      if (match && net.ssid && net.routerId && !cfg.networkRouters[match])
-        o.learnRouter?.(match, net.routerId)
+      if (netMatch && net.ssid && net.routerId && !cfg.networkRouters[netMatch])
+        o.learnRouter?.(netMatch, net.routerId)
       if (onWork) offSince = null
       else if (offSince === null) offSince = t
       // Leaving for the grace period ends the hold, so the next arrival starts tracking again.

@@ -105,6 +105,8 @@ function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<
   // macOS hides Wi-Fi names from apps without Location access.
   const [loc, setLoc] = useState<LocationStatus | null>(null)
   const [asking, setAsking] = useState(false)
+  // macOS showed no prompt: System Settings is the only way left.
+  const [noPrompt, setNoPrompt] = useState(false)
   const load = useCallback((live = { current: true }) => {
     window.api['wifi:current']().then(
       (n) => {
@@ -124,10 +126,12 @@ function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<
     }
   }, [load])
   const askLocation = async (): Promise<void> => {
+    if (noPrompt) return void window.api['wifi:openLocationSettings']()
     setAsking(true)
     const s = await window.api['wifi:requestLocation']().catch(() => null)
     setAsking(false)
     if (s) setLoc(s)
+    if (s !== 'granted' && s !== 'denied' && s !== 'restricted') setNoPrompt(true)
     load()
   }
   const connected = net !== 'loading' && !!net && (!!net.ssid || !!net.routerId)
@@ -173,7 +177,7 @@ function AutoStep({ settings, patch }: { settings: Settings; patch: (p: Partial<
                 <span className="flex flex-wrap items-center gap-2 text-muted">
                   macOS hides the network name from apps without Location access.
                   <Button type="button" size="sm" variant="secondary" onClick={() => void askLocation()} disabled={asking}>
-                    {asking ? 'Waiting…' : 'Allow location access'}
+                    {asking ? 'Waiting…' : noPrompt ? 'Open System Settings' : 'Allow location access'}
                   </Button>
                 </span>
               ) : (

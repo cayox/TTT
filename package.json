@@ -1,7 +1,7 @@
 {
   "name": "ttt",
   "productName": "TTT",
-  "version": "0.3.0-beta.1",
+  "version": "0.4.0-beta.1",
   "description": "TTT, the Time Tracking Tool",
   "main": "./out/main/index.js",
   "private": true,

@@ -163,7 +163,7 @@ export function TodayPage() {
   else status = `${formatDurationLong(remaining)} to go`
 
   const detail = current
-    ? `Since ${formatClock(current.startTs)}${current.source === 'wifi' ? ', started by Wi-Fi' : ''}.`
+    ? `Since ${formatClock(current.startTs)}${current.source === 'wifi' ? ', started automatically' : ''}.`
     : list.length
       ? 'Paused. Start again when you are back.'
       : 'Nothing tracked yet today.'
@@ -627,7 +627,7 @@ function TodaySessions({ list, now, today, onChanged }: { list: Session[]; now: 
                   value={s.projectId}
                   onChange={(id) => void act.update(s.id, { projectId: id }, true, s)}
                 />
-                {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
+                {s.source === 'wifi' && <Badge>Auto</Badge>}
                 <span className="tnum w-12 shrink-0 text-right text-muted">{formatDuration(((s.endTs ?? now) - s.startTs) / 60000)}</span>
                 <span className="flex opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100">
                   <IconButton size="sm" label="Edit session" onClick={() => setEditing(s.id)}><PencilSimple size={14} /></IconButton>

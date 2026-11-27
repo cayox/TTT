@@ -13,7 +13,7 @@ import { rangeStats, totalBalance, dateKey, startOfDay, projectTotals, addDays, 
 import { unionLength } from '@shared/intervals'
 import { createWifiWatcher } from './wifi/watcher'
 import { getCurrentNetwork } from './wifi/ssid'
-import { locationStatus, openLocationSettings, requestLocation } from './wifi/location'
+import { locate, locationStatus, openLocationSettings, recentFix, registerHelper, requestLocation } from './wifi/location'
 import { createExporter } from './export'
 import { monthHours, monthTotals } from '@shared/hours'
 import { parseChangelog } from '@shared/changelog'
@@ -135,9 +135,10 @@ app.whenReady().then(async () => {
   const notify = createNotifier({ enabled: () => r.settings.get().notifications, onClick: showWindow })
   const projectName = (id: number | null | undefined): string | null => (id == null ? null : (r.projects.get(id)?.name ?? null))
 
-  // Wi-Fi auto-tracking: sessions started here go to the network's project.
+  // Auto-tracking by work network or work place: sessions started here go to its project.
   const watcher = createWifiWatcher({
     getNetwork: getCurrentNetwork,
+    getLocation: () => recentFix(),
     getSettings: () => r.settings.get(),
     now: Date.now,
     isRunning: () => !!r.sessions.current(),
@@ -149,7 +150,7 @@ app.whenReady().then(async () => {
       const s = r.sessions.start('wifi', Date.now(), r.projects.forSsid(ssid))
       changed()
       const p = projectName(s.projectId)
-      notify('autoTrack', 'Tracking started', `On ${ssid}${p ? `, for ${p}` : ''}. Pause any time from the menu bar.`)
+      notify('autoTrack', 'Tracking started', `At ${ssid}${p ? `, for ${p}` : ''}. Pause any time from the menu bar.`)
     },
     onStop: (endTs) => {
       r.sessions.stop(endTs)
@@ -157,7 +158,7 @@ app.whenReady().then(async () => {
       notify(
         'autoTrack',
         'Tracking stopped',
-        `You left the work network. The session ended at ${formatClock(endTs)}; ${formatDuration(todayMs() / 60000)} today.`
+        `You left work. The session ended at ${formatClock(endTs)}; ${formatDuration(todayMs() / 60000)} today.`
       )
     }
   })
@@ -485,7 +486,7 @@ app.whenReady().then(async () => {
       `TTT ${app.getVersion()} (${app.isPackaged ? 'packaged' : 'dev'})`,
       `Electron ${process.versions.electron}, macOS ${process.getSystemVersion?.() ?? release()}, ${arch()}`,
       `Sessions: ${counts.n}${counts.first ? `, since ${dateKey(counts.first)}` : ''}; running: ${r.sessions.current() ? 'yes' : 'no'}`,
-      `Projects: ${r.projects.list().length}; work networks: ${s.workSsids.length}; auto-track: ${s.autoTrack}`,
+      `Projects: ${r.projects.list().length}; work networks: ${s.workSsids.length}; work places: ${s.workPlaces.length}; auto-track: ${s.autoTrack}`,
       `Monthly hours: ${s.monthlyHoursByProject ? 'per project' : s.monthlyHoursMin ? 'total' : 'off'}; break rules: ${s.breakRules}; deduct: ${s.deductBreaks}`,
       `Idle ask: ${s.idleMinutes} min; forgotten after: ${s.maxSessionHours} h; shortcut: ${shortcut || 'off'}`,
       `Database: ${integrity(db).detail}; schema v${db.pragma('user_version', { simple: true })}; backups: ${b.length}${b[0] ? `, newest ${new Date(b[0].at).toISOString()}` : ''}`,
@@ -536,6 +537,7 @@ app.whenReady().then(async () => {
     'wifi:locationStatus': () => locationStatus(),
     'wifi:requestLocation': () => requestLocation(mainWin),
     'wifi:openLocationSettings': () => openLocationSettings(),
+    'wifi:location': () => locate(),
     'export:pdf': (y, m) => exporter.pdf(mainWin, y, m),
     'export:copyText': (y, m) => exporter.copyText(y, m),
     'export:openWhatsapp': (y, m) => exporter.openWhatsapp(y, m),
@@ -634,7 +636,8 @@ app.whenReady().then(async () => {
       })
     }
   })
-  watcher.start()
+  // Register the helper before the first poll, so macOS knows it as an app even right after an update.
+  void registerHelper().finally(() => watcher.start())
   updater.start()
   createWindow()
   app.on('activate', showWindow)

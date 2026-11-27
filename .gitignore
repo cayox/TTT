@@ -5,3 +5,4 @@ release
 .DS_Store
 *.log
 build/ssid-helper
+build/TTT Location.app

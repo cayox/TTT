@@ -21,7 +21,7 @@
 
 - **One click to start.** Start or pause from the window, the menu bar menu or <kbd>⌘</kbd><kbd>↩</kbd>. The menu bar ring fills up as you work through the day and shows a dot while the timer runs.
 - **A running overtime balance.** Set your expected hours per weekday. TTT keeps the difference between what you worked and what you were expected to work, day by day, including a balance you carry over from before.
-- **Hands-free at the office.** Add your work Wi-Fi and TTT starts when you join it and stops a few minutes after you leave. If macOS hides the network name, TTT recognizes the network by its router.
+- **Hands-free at the office.** Add your work Wi-Fi and TTT starts when you join it and stops a few minutes after you leave. If macOS hides the network name, TTT recognizes the network by its router. Places without their own Wi-Fi, like a client site, work by location instead.
 - **Projects.** Every session belongs to a project, so you can see where the time went, today and over any range.
 - **Days off.** Mark vacation, sick days and holidays in History. Credited days count as a full workday, so they never leave a deficit.
 - **Monthly hours with flextime.** Enter the hours from your contract, in total or per project. With flextime (Gleitzeit) TTT shows what is left this month, what each remaining workday needs, and how far ahead or behind you are.
@@ -50,7 +50,7 @@
 xattr -dr com.apple.quarantine /Applications/TTT.app
 ```
 
-macOS only reveals Wi-Fi names to apps with Location access, so TTT asks for it when you switch automatic tracking on — during onboarding or in Settings → Tracking, which also has an **Allow location access** button. Say no and everything still works: TTT then recognizes a work network by its router instead of its name. Because the app is only ad-hoc signed, macOS may ask again after an update.
+macOS only reveals Wi-Fi names to apps with Location access, so TTT asks for it when you switch automatic tracking on — during onboarding or in Settings → Tracking, which also has an **Allow location access** button. Work places need it too. Say no and work networks still work: TTT then recognizes them by their router instead of their name. Because the app is only ad-hoc signed, macOS may ask again after an update.
 
 ## Updates
 
@@ -109,7 +109,7 @@ src/
   preload/    Typed bridge between main and renderer
   renderer/   React app: pages, components, design tokens
   shared/     Types and pure logic (time math, stats, monthly hours), unit tested
-build/        App icon sources, the Wi-Fi helper and the release-notes script
+build/        App icon sources, the location helper app and the release-notes script
 ```
 
 The app icon is drawn in `build/icon.svg`; `build/make-icon.sh` renders `icon.png` and `icon.icns`. The menu bar glyph is drawn in code in `src/main/tray/icon.ts`.

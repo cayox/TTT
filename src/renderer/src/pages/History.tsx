@@ -127,7 +127,7 @@ function DayRow({ stat, sessions, override, schedule, open, onToggle, refetch, o
                 <span className="tnum w-28 shrink-0">{formatClock(s.startTs)}–{s.endTs ? formatClock(s.endTs) : 'running'}</span>
                 <span className="tnum w-14 shrink-0 text-muted">{s.endTs ? formatDuration((s.endTs - s.startTs) / 60000) : ''}</span>
                 <ProjectLabel project={projectById(s.projectId)} className="w-36 shrink-0" />
-                {s.source === 'wifi' && <Badge>Wi-Fi</Badge>}
+                {s.source === 'wifi' && <Badge>Auto</Badge>}
                 {overlaps.has(s.id) && <span title="This session overlaps another one. The time is only counted once; edit or delete one of them."><Badge tone="under">Overlaps</Badge></span>}
                 <span className="min-w-0 flex-1 truncate text-muted">{s.note}</span>
                 <span className="flex">

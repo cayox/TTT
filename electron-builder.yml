@@ -15,10 +15,11 @@ npmRebuild: false
 # better-sqlite3's native binding cannot load from inside the asar archive.
 asarUnpack:
   - '**/*.node'
-# CoreWLAN helper that reads the Wi-Fi name (npm run helper); src/main/wifi/ssid.ts looks for it here.
+# CoreWLAN helper that reads the Wi-Fi name and asks for Location (npm run helper); src/main/wifi/ssid.ts looks for it here.
 extraResources:
-  - from: build/ssid-helper
-    to: ssid-helper
+  # A real app bundle, so macOS can show the Location prompt for it (see build/make-helper.sh).
+  - from: build/TTT Location.app
+    to: TTT Location.app
   # Read by Settings -> What's new; the updater shows GitHub's release notes instead.
   - from: CHANGELOG.md
     to: CHANGELOG.md

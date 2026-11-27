@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, EXPORT_ROUNDING, GLOBAL_SHORTCUTS, TIME_STEPS, type DayKind, type Settings } from './types'
+import { DEFAULT_SETTINGS, EXPORT_ROUNDING, GLOBAL_SHORTCUTS, TIME_STEPS, type DayKind, type Settings, type WorkPlace } from './types'
 
 const KINDS: DayKind[] = ['holiday', 'vacation', 'sick', 'custom']
 type Key = keyof Settings
@@ -16,6 +16,23 @@ const isString = (x: unknown): x is string => typeof x === 'string'
 const isMinutes = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0
 const isId = (x: unknown): x is number => typeof x === 'number' && Number.isInteger(x) && x > 0
 
+/** Keeps the well-formed places, trimmed, one per name. */
+const places = (v: unknown): WorkPlace[] | undefined => {
+  if (!Array.isArray(v)) return undefined
+  const out: WorkPlace[] = []
+  for (const p of v) {
+    if (!isObj(p) || typeof p.name !== 'string') continue
+    const name = p.name.trim()
+    const lat = num(p.lat, -90, 90)
+    const lon = num(p.lon, -180, 180)
+    const radius = num(p.radius, 10, 10000)
+    if (!name || lat === undefined || lon === undefined || radius === undefined) continue
+    if (out.some((x) => x.name.toLowerCase() === name.toLowerCase())) continue
+    out.push({ name, lat, lon, radius })
+  }
+  return out
+}
+
 /** Checks one value; undefined means it is not acceptable for that key. */
 const CHECK: { [K in Key]: (v: unknown) => Settings[K] | undefined } = {
   theme: (v) => (v === 'system' || v === 'light' || v === 'dark' ? v : undefined),
@@ -30,6 +47,7 @@ const CHECK: { [K in Key]: (v: unknown) => Settings[K] | undefined } = {
   creditKinds: (v) => strings(v)?.filter((k): k is DayKind => (KINDS as string[]).includes(k)),
   defaultProjectId: (v) => (v === null || isId(v) ? v : undefined),
   networkRouters: (v) => record(v, isString),
+  workPlaces: places,
   ssidProjects: (v) => record(v, isId),
   startingBalance: (v) => num(v, -1e7, 1e7),
   exportName: (v) => (typeof v === 'string' ? v.slice(0, 200) : undefined),

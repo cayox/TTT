@@ -98,7 +98,7 @@ function StatusPill() {
             <span className="tnum ml-1 text-[12.5px] font-medium" aria-label="Current session length">
               {elapsed(now - current.startTs)}
             </span>
-            {current.source === 'wifi' && <span className="text-[11px] text-faint">Wi-Fi</span>}
+            {current.source === 'wifi' && <span className="text-[11px] text-faint">Auto</span>}
             <span aria-hidden className="mx-1 h-4 w-px bg-line-strong" />
           </>
         )}
